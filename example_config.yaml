@@ -1,0 +1,244 @@
+external_components:
+  - source:
+      type: git
+      url: https://github.com/TimelessNL/ESPHome-Zehnder-RF.git
+      ref: main
+    components: [ nrf905, zehnder ]
+
+substitutions:
+  hostname: zehnder-comfofan
+  device_name: Zehnder ComfoFan
+  device_id: zehnder_comfofan
+
+esphome:
+  name: ${hostname}
+  comment: "Zehnder ComfoFan"
+  project:
+    name: "ESPHome.Zehnder"
+    version: "Zehnder ComfoFan"
+    
+  on_boot:
+    priority: -100
+    then:
+     - lambda: |-
+         ${device_id}_ventilation->set_config(0x00000000, 0x00, 0x00, 0x00, 0x00);
+
+esp8266:
+  board: esp12e
+  restore_from_flash: false
+
+preferences:
+  flash_write_interval: 1d
+
+# SPI
+spi:
+  clk_pin:  GPIO14 #D5
+  mosi_pin: GPIO13 #D7
+  miso_pin: GPIO12 #D6
+
+# nRF905 config
+nrf905:
+  id: "nrf905_rf"
+  cs_pin:   GPIO15 #D8
+  cd_pin:   GPIO5  #D1
+  ce_pin:   GPIO4  #D2
+  pwr_pin:  GPIO0  #D3
+  txen_pin: GPIO16 #D0
+
+# Enable logging
+logger:
+  level: INFO
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: HIGH
+  fast_connect: true
+  domain: ".local"
+
+web_server:
+  port: 80
+  local: true
+  version: 2
+  auth:
+    username: admin
+    password: !secret web_password
+
+captive_portal:
+
+time:
+  - platform: sntp
+    timezone: Europe/Brussels
+    servers:
+      - "pool.ntp.org"
+
+light:
+  - platform: status_led
+    name: "${device_name} Status LED"
+    id: "${device_id}_status_led"
+    internal: true
+    pin:
+      number: GPIO2
+      inverted: true
+
+binary_sensor:
+  - platform: template
+    name: "${device_name} Timer"
+    id: "${device_id}_timer"
+    icon: mdi:fan-clock
+
+sensor:
+  - platform: wifi_signal
+    name: "${device_name} RSSI"
+    update_interval: 60s
+
+  - platform: uptime
+    name: "${device_name} Uptime"
+
+  - platform: adc
+    pin: VCC
+    name: "${device_name} Power Supply"
+
+  - platform: template
+    name: "${device_name} Ventilation Percentage"
+    id: "${device_id}_ventilation_percentage"
+    state_class: measurement
+    unit_of_measurement: '%'
+    icon: mdi:percent
+    accuracy_decimals: 0
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "${device_name} IP Address"
+    ssid:
+      name: "${device_name} SSID"
+    bssid:
+      name: "${device_name} BSSID"
+    mac_address:
+      name: "${device_name} MAC"
+
+  - platform: template
+    name: "${device_name} Ventilation Mode"
+    id: "${device_id}_ventilation_mode"
+    icon: mdi:information
+
+switch:
+  - platform: safe_mode
+    name: "${device_name} Restart (Safe Mode)"
+  - platform: restart
+    name: "${device_name} Restart"
+
+button:
+  - platform: template
+    id: ${device_id}_auto
+    name: ${device_name} Auto
+    icon: mdi:fan-auto
+    on_press:
+      then:
+      - light.turn_on: "${device_id}_status_led"
+      - delay: 500ms
+      - light.turn_off: "${device_id}_status_led"
+      - lambda: |-
+          ${device_id}_ventilation->setSpeed(0, 0);
+  - platform: template
+    id: ${device_id}_low
+    name: ${device_name} Low
+    icon: mdi:fan-speed-1
+    on_press:
+      then:
+      - light.turn_on: "${device_id}_status_led"
+      - delay: 500ms
+      - light.turn_off: "${device_id}_status_led"
+      - lambda: |-
+          ${device_id}_ventilation->setSpeed(1, 0);
+  - platform: template
+    id: ${device_id}_medium
+    name: ${device_name} Medium
+    icon: mdi:fan-speed-2
+    on_press:
+      then:
+      - light.turn_on: "${device_id}_status_led"
+      - delay: 500ms
+      - light.turn_off: "${device_id}_status_led"
+      - lambda: |-
+          ${device_id}_ventilation->setSpeed(2, 0);
+  - platform: template
+    id: ${device_id}_high
+    name: ${device_name} High
+    icon: mdi:fan-speed-3
+    on_press:
+      then:
+      - light.turn_on: "${device_id}_status_led"
+      - delay: 500ms
+      - light.turn_off: "${device_id}_status_led"
+      - lambda: |-
+          ${device_id}_ventilation->setSpeed(3, 0);
+  - platform: template
+    id: ${device_id}_max_10
+    name: ${device_name} Max 10
+    icon: mdi:fast-forward-10
+    on_press:
+      then:
+      - light.turn_on: "${device_id}_status_led"
+      - delay: 500ms
+      - light.turn_off: "${device_id}_status_led"
+      - lambda: |-
+          ${device_id}_ventilation->setSpeed(4, 10);
+  - platform: template
+    id: ${device_id}_max_30
+    name: ${device_name} Max 30
+    icon: mdi:fast-forward-30
+    on_press:
+      then:
+      - light.turn_on: "${device_id}_status_led"
+      - delay: 500ms
+      - light.turn_off: "${device_id}_status_led"
+      - lambda: |-
+          ${device_id}_ventilation->setSpeed(4, 30);
+  - platform: template
+    id: ${device_id}_max_60
+    name: ${device_name} Max 60
+    icon: mdi:fast-forward-60
+    on_press:
+      then:
+      - light.turn_on: "${device_id}_status_led"
+      - delay: 500ms
+      - light.turn_off: "${device_id}_status_led"
+      - lambda: |-
+          ${device_id}_ventilation->setSpeed(4, 60);
+
+# The FAN controller
+fan:
+  - platform: zehnder
+    id: ${device_id}_ventilation
+    name: "${device_name} Ventilation"
+    nrf905: nrf905_rf
+    update_interval: "60s"
+    on_speed_set:
+      - light.turn_on: "${device_id}_status_led"
+      - delay: 500ms
+      - light.turn_off: "${device_id}_status_led"
+      - sensor.template.publish:
+          id: ${device_id}_ventilation_percentage
+          state: !lambda 'return ${device_id}_ventilation->voltage;'
+      - binary_sensor.template.publish:
+          id: ${device_id}_timer
+          state: !lambda 'return ${device_id}_ventilation->timer;'
+      - text_sensor.template.publish:
+          id: ${device_id}_ventilation_mode
+          state: !lambda 'switch (${device_id}_ventilation->speed) {
+                             case 1: return "Low";
+                             case 2: return "Medium";
+                             case 3: return "High";
+                             case 4: return "Max";
+                             default: return "Auto";
+                         }'
