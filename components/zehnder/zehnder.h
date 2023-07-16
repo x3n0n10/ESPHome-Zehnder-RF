@@ -68,6 +68,11 @@ class ZehnderRF : public Component, public fan::Fan {
   void set_update_interval(const uint32_t interval) { interval_ = interval; }
 
   void dump_config() override;
+  void set_config(const uint32_t fan_networkId,
+                  const uint8_t  fan_my_device_type,
+                  const uint8_t  fan_my_device_id,
+                  const uint8_t  fan_main_unit_type,
+                  const uint8_t  fan_main_unit_id);
 
   fan::FanTraits get_traits() override;
   int get_speed_count() { return this->speed_count_; }
@@ -79,6 +84,9 @@ class ZehnderRF : public Component, public fan::Fan {
   float get_setup_priority() const override { return setup_priority::DATA; }
 
   void setSpeed(const uint8_t speed, const uint8_t timer = 0);
+
+  bool timer;
+  int voltage;
 
  protected:
   void queryDevice(void);

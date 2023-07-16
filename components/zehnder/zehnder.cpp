@@ -159,6 +159,20 @@ void ZehnderRF::dump_config(void) {
   ESP_LOGCONFIG(TAG, "  Fan main unit id   0x%02X", this->config_.fan_main_unit_id);
 }
 
+void ZehnderRF::set_config(const uint32_t fan_networkId,
+                           const uint8_t  fan_my_device_type,
+                           const uint8_t  fan_my_device_id,
+                           const uint8_t  fan_main_unit_type,
+                           const uint8_t  fan_main_unit_id) {
+  this->config_.fan_networkId      = fan_networkId;      // Fan (Zehnder/BUVA) network ID
+  this->config_.fan_my_device_type = fan_my_device_type; // Fan (Zehnder/BUVA) device type
+  this->config_.fan_my_device_id   = fan_my_device_id;   // Fan (Zehnder/BUVA) device ID
+  this->config_.fan_main_unit_type = fan_main_unit_type; // Fan (Zehnder/BUVA) main unit type
+  this->config_.fan_main_unit_id   = fan_main_unit_id;   // Fan (Zehnder/BUVA) main unit ID
+  ESP_LOGD(TAG, "Saving pairing config");
+  this->pref_.save(&this->config_);
+}
+
 void ZehnderRF::loop(void) {
   uint8_t deviceId;
   nrf905::Config rfConfig;
@@ -292,7 +306,7 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
             (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);  // Clear frame data
 
             pTxFrame->rx_type = FAN_TYPE_MAIN_UNIT;  // Set type to main unit
-            pTxFrame->rx_id = pResponse->tx_id;      // Set ID to the ID of the main unit
+            pTxFrame->rx_id = 0x00;  // Broadcast
             pTxFrame->tx_type = this->config_.fan_my_device_type;
             pTxFrame->tx_id = this->config_.fan_my_device_id;
             pTxFrame->ttl = FAN_TTL;
@@ -361,6 +375,8 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
 
             this->state = pResponse->payload.fanSettings.speed > 0;
             this->speed = pResponse->payload.fanSettings.speed;
+            this->timer = pResponse->payload.fanSettings.timer;
+            this->voltage = pResponse->payload.fanSettings.voltage;
             this->publish_state();
 
             this->state_ = StateIdle;
@@ -497,7 +513,7 @@ void ZehnderRF::setSpeed(const uint8_t paramSpeed, const uint8_t paramTimer) {
 
     // Build frame
     pFrame->rx_type = this->config_.fan_main_unit_type;
-    pFrame->rx_id = this->config_.fan_main_unit_id;
+    pFrame->rx_id = 0x00;  // Broadcast
     pFrame->tx_type = this->config_.fan_my_device_type;
     pFrame->tx_id = this->config_.fan_my_device_id;
     pFrame->ttl = FAN_TTL;
