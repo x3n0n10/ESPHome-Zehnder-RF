@@ -159,20 +159,6 @@ void ZehnderRF::dump_config(void) {
   ESP_LOGCONFIG(TAG, "  Fan main unit id   0x%02X", this->config_.fan_main_unit_id);
 }
 
-void ZehnderRF::set_config(const uint32_t fan_networkId,
-                           const uint8_t  fan_my_device_type,
-                           const uint8_t  fan_my_device_id,
-                           const uint8_t  fan_main_unit_type,
-                           const uint8_t  fan_main_unit_id) {
-  this->config_.fan_networkId      = fan_networkId;      // Fan (Zehnder/BUVA) network ID
-  this->config_.fan_my_device_type = fan_my_device_type; // Fan (Zehnder/BUVA) device type
-  this->config_.fan_my_device_id   = fan_my_device_id;   // Fan (Zehnder/BUVA) device ID
-  this->config_.fan_main_unit_type = fan_main_unit_type; // Fan (Zehnder/BUVA) main unit type
-  this->config_.fan_main_unit_id   = fan_main_unit_id;   // Fan (Zehnder/BUVA) main unit ID
-  ESP_LOGD(TAG, "Saving pairing config");
-  this->pref_.save(&this->config_);
-}
-
 void ZehnderRF::loop(void) {
   uint8_t deviceId;
   nrf905::Config rfConfig;
@@ -306,7 +292,7 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
             (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);  // Clear frame data
 
             pTxFrame->rx_type = FAN_TYPE_MAIN_UNIT;  // Set type to main unit
-            pTxFrame->rx_id = 0x00;  // Broadcast
+            pTxFrame->rx_id = pResponse->tx_id;      // Set ID to the ID of the main unit
             pTxFrame->tx_type = this->config_.fan_my_device_type;
             pTxFrame->tx_id = this->config_.fan_my_device_id;
             pTxFrame->ttl = FAN_TTL;
