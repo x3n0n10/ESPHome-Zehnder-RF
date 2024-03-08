@@ -387,9 +387,14 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
             ESP_LOGD(TAG, "Received fan settings; speed: 0x%02X voltage: %i timer: %i",
                      pResponse->payload.fanSettings.speed, pResponse->payload.fanSettings.voltage,
                      pResponse->payload.fanSettings.timer);
-            this->rfComplete();
 
             this->rfComplete();
+
+            this->state = pResponse->payload.fanSettings.speed > 0;
+            this->speed = pResponse->payload.fanSettings.speed;
+            this->timer = pResponse->payload.fanSettings.timer;
+            this->voltage = pResponse->payload.fanSettings.voltage;
+            this->publish_state();
 
             (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);  // Clear frame data
 
