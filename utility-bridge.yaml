@@ -50,6 +50,8 @@ api:
               id(${device_id}_ventilation).setSpeed(4, 30);
             } else if (mode == "Max_60m") {
               id(${device_id}_ventilation).setSpeed(4, 60);
+            } else {
+              ESP_LOGW("zehnder", "Unknown mode %s", mode);
             }
 
 ota:
