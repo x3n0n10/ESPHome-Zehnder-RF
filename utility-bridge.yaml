@@ -12,7 +12,7 @@ esp32:
   framework:
     type: arduino
 
-  # Enable logging
+# Enable logging
 logger:
   level: INFO
 
