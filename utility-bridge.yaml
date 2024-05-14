@@ -14,7 +14,7 @@ esp32:
 
   # Enable logging
 logger:
-  level: DEBUG
+  level: INFO
 
 preferences:
   flash_write_interval: 1d
@@ -136,7 +136,7 @@ text_sensor:
                      case 4: return std::string("Max");
                      default: return std::string("Auto");
                  }'
-    
+
 switch:
   - platform: safe_mode
     name: "${device_name} Restart (Safe Mode)"
