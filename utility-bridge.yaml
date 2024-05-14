@@ -12,9 +12,9 @@ esp32:
   framework:
     type: arduino
 
-# Enable logging
+  # Enable logging
 logger:
-  level: INFO
+  level: DEBUG
 
 preferences:
   flash_write_interval: 1d
@@ -87,12 +87,13 @@ binary_sensor:
     name: "${device_name} Timer"
     id: "${device_id}_timer"
     icon: mdi:fan-clock
+    update_interval: 15s
+    lambda: !lambda 'return ${device_id}_ventilation->timer;'
 
 sensor:
   - platform: wifi_signal
     name: "${device_name} RSSI"
     id: "${device_id}_rssi"
-    update_interval: 60s
 
   - platform: uptime
     name: "${device_name} Uptime"
@@ -105,6 +106,8 @@ sensor:
     unit_of_measurement: '%'
     icon: mdi:percent
     accuracy_decimals: 0
+    update_interval: 15s
+    lambda: !lambda 'return ${device_id}_ventilation->voltage;'
 
 text_sensor:
   - platform: wifi_info
@@ -124,8 +127,16 @@ text_sensor:
   - platform: template
     name: "${device_name} Ventilation Mode"
     id: "${device_id}_ventilation_mode"
+    update_interval: 15s
     icon: mdi:information
-
+    lambda: !lambda 'switch (${device_id}_ventilation->speed) {
+                     case 1: return std::string("Low");
+                     case 2: return std::string("Medium");
+                     case 3: return std::string("High");
+                     case 4: return std::string("Max");
+                     default: return std::string("Auto");
+                 }'
+    
 switch:
   - platform: safe_mode
     name: "${device_name} Restart (Safe Mode)"
