@@ -87,7 +87,6 @@ binary_sensor:
     name: "${device_name} Timer"
     id: "${device_id}_timer"
     icon: mdi:fan-clock
-    update_interval: 15s
     lambda: !lambda 'return ${device_id}_ventilation->timer;'
 
 sensor:
