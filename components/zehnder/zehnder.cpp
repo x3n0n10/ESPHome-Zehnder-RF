@@ -366,6 +366,7 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       break;
 
     case StateWaitQueryResponse:
+    case StateIdle:
       if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
           (pResponse->rx_id == this->config_.fan_my_device_id)) {      // and id match, it is for us
         switch (pResponse->command) {
