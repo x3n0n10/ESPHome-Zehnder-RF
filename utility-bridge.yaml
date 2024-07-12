@@ -203,7 +203,7 @@ button:
 # Load external components
 # https://esphome.io/components/external_components.html#external-components-git
 external_components:
-  - source: github://edwardmp/ESPHome-Zehnder-RF
+  - source: github://bramboe/ESPHome-Zehnder-RF
     components: [ nrf905, zehnder ]
     refresh: 0s
 
@@ -211,7 +211,7 @@ external_components:
 spi:
   clk_pin: GPIO14
   mosi_pin: GPIO13
-  miso_pin: GPIO12
+  miso_pin: GPIO16
 
 # nRF905 config
 nrf905:
@@ -221,8 +221,9 @@ nrf905:
   ce_pin: GPIO27
   pwr_pin: GPIO26
   txen_pin: GPIO25
-  am_pin: GPIO32
-  dr_pin: GPIO35
+  # We don't need AM and DR at the moment as they are read from the inernal registers
+  # am_pin: GPIO32
+  # dr_pin: GPIO35
 
 # The FAN controller
 fan:
