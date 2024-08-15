@@ -64,7 +64,9 @@ fan::FanTraits ZehnderRF::get_traits() {
 
 void ZehnderRF::control(const fan::FanCall &call) {
   if (call.get_state().has_value()) {
-    this->state_ = *call.get_state();
+    bool fan_state = *call.get_state();
+    // Convert boolean to the appropriate State value
+    this->state_ = fan_state ? StateOn : StateOff; // Adjust according to your State enum
     ESP_LOGD(TAG, "Control has state: %u", this->state_);
   }
   if (call.get_speed().has_value()) {
