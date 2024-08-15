@@ -92,7 +92,7 @@ class ZehnderRF : public Component, public fan::Fan {
   void queryDevice(void);
 
   uint8_t createDeviceID(void);
-  void discoveryStart(const uint8_t deviceId); // Ensure there is no duplicate method
+  // void discoveryStart(const uint8_t deviceId); // Ensure there is no duplicate method
 
   Result startTransmit(const uint8_t *const pData, const int8_t rxRetries = -1,
                        const std::function<void(void)> callback = NULL);
