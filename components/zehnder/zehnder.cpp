@@ -56,7 +56,7 @@ typedef struct __attribute__((packed)) {
   } payload;
 } RfFrame;
 
-ZehnderRF::ZehnderRF(void) {}
+ZehnderRF::ZehnderRF() {}
 
 fan::FanTraits ZehnderRF::get_traits() {
   return fan::FanTraits(false, true, false, this->speed_count_);
@@ -64,8 +64,8 @@ fan::FanTraits ZehnderRF::get_traits() {
 
 void ZehnderRF::control(const fan::FanCall &call) {
   if (call.get_state().has_value()) {
-    this->state = *call.get_state();
-    ESP_LOGD(TAG, "Control has state: %u", this->state);
+    this->state_ = *call.get_state();
+    ESP_LOGD(TAG, "Control has state: %u", this->state_);
   }
   if (call.get_speed().has_value()) {
     this->speed = *call.get_speed();
@@ -74,7 +74,7 @@ void ZehnderRF::control(const fan::FanCall &call) {
 
   switch (this->state_) {
     case StateIdle:
-      this->setSpeed(this->state ? this->speed : 0x00, 0);
+      this->setSpeed(this->state_ ? this->speed : 0x00, 0);
       this->lastFanQuery_ = millis();
       break;
 
@@ -137,7 +137,7 @@ void ZehnderRF::setup() {
   });
 }
 
-void ZehnderRF::dump_config(void) {
+void ZehnderRF::dump_config() {
   ESP_LOGCONFIG(TAG, "Zehnder Fan config:");
   ESP_LOGCONFIG(TAG, "  Polling interval   %u", this->interval_);
   ESP_LOGCONFIG(TAG, "  Fan networkId      0x%08X", this->config_.fan_networkId);
@@ -156,7 +156,6 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       switch (pResponse->command) {
         case FAN_NETWORK_JOIN_REQUEST:
           ESP_LOGD(TAG, "Discovery: Request received from unit 0x%02X", pResponse->tx_id);
-
           this->state_ = StateDiscoveryWaitForLinkAck;
           break;
       }
@@ -166,7 +165,6 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       switch (pResponse->command) {
         case FAN_NETWORK_JOIN_ACK:
           ESP_LOGD(TAG, "Discovery: Ack received from unit 0x%02X", pResponse->tx_id);
-
           this->state_ = StateIdle;
           break;
       }
@@ -185,7 +183,7 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
   }
 }
 
-void ZehnderRF::rfHandler(void) {
+void ZehnderRF::rfHandler() {
   switch (this->rfState_) {
     case RfStateIdle:
       break;
@@ -215,7 +213,7 @@ void ZehnderRF::rfHandler(void) {
 }
 
 void ZehnderRF::sendRfFrame(const uint8_t deviceType, const uint8_t ttl) {
-  RfFrame *const pFrame = (RfFrame *) this->_txFrame;
+  RfFrame *const pFrame = reinterpret_cast<RfFrame *>(this->_txFrame);
 
   pFrame->rx_type = this->config_.fan_main_unit_type;
   pFrame->rx_id = this->config_.fan_main_unit_id;
@@ -232,7 +230,7 @@ void ZehnderRF::sendRfFrame(const uint8_t deviceType, const uint8_t ttl) {
 }
 
 void ZehnderRF::setSpeed(const uint8_t speed, const uint8_t timer) {
-  RfFrame *const pFrame = (RfFrame *) this->_txFrame;
+  RfFrame *const pFrame = reinterpret_cast<RfFrame *>(this->_txFrame);
 
   ESP_LOGD(TAG, "Set fan speed 0x%02X timer %u", speed, timer);
 
@@ -241,7 +239,7 @@ void ZehnderRF::setSpeed(const uint8_t speed, const uint8_t timer) {
   pFrame->payload.setTimer.speed = speed;
   pFrame->payload.setTimer.timer = timer;
 
-  this->sendRfFrame(FAN_TYPE_REMOTE, FAN_TTL);
+  this->sendRfFrame(FAN_UNIT_TYPE_REMOTE, FAN_TTL);
 
   this->state_ = StateWaitSetSpeedConfirm;
 }
@@ -250,19 +248,19 @@ void ZehnderRF::fanSettingsReceived(const uint8_t speed, const uint8_t voltage, 
   ESP_LOGD(TAG, "Fan settings speed %u, voltage %u, timer %u", speed, voltage, timer);
 }
 
-void ZehnderRF::queryDevice(void) {
-  RfFrame *const pFrame = (RfFrame *) this->_txFrame;
+void ZehnderRF::queryDevice() {
+  RfFrame *const pFrame = reinterpret_cast<RfFrame *>(this->_txFrame);
 
   pFrame->command = FAN_UPDATE_SETTINGS;
   pFrame->parameter_count = 0;
 
-  this->sendRfFrame(FAN_TYPE_REMOTE, FAN_TTL);
+  this->sendRfFrame(FAN_UNIT_TYPE_REMOTE, FAN_TTL);
 
   this->lastFanQuery_ = millis();  // Update time
   this->state_ = StateWaitQueryForUpdate;
 }
 
-uint8_t ZehnderRF::createDeviceID(void) {
+uint8_t ZehnderRF::createDeviceID() {
   uint32_t v = 0;
   uint32_t v1, v2;
 
@@ -303,7 +301,7 @@ void ZehnderRF::discoveryStart(uint8_t deviceId) {
   ESP_LOGD(TAG, "Starting discovery with parameter: %u", deviceId);
 
   // Initialize the discovery frame
-  RfFrame *const pFrame = (RfFrame *) this->_txFrame;
+  RfFrame *const pFrame = reinterpret_cast<RfFrame *>(this->_txFrame);
   
   pFrame->rx_type = FAN_TYPE_BROADCAST;  // Broadcast to all devices
   pFrame->rx_id = 0xFF;                  // Broadcast to all IDs
