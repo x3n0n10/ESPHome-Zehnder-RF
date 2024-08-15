@@ -16,26 +16,32 @@ namespace zehnder {
 #define FAN_TTL 250             // 0xFA, default time-to-live for a frame
 #define FAN_REPLY_TIMEOUT 1000  // Wait 500ms for receiving a reply when doing a network scan
 
+// Additional Fan Unit Types
+#define FAN_UNIT_TYPE_MAIN 0x01
+#define FAN_UNIT_TYPE_REMOTE 0x02
+#define FAN_NETWORK_LINK_TTL 3
+#define FAN_UPDATE_SETTINGS 0x07
+#define FAN_SET_SPEED_TIMER 0x03
+
 /* Fan device types */
 enum {
   FAN_TYPE_BROADCAST = 0x00,       // Broadcast to all devices
   FAN_TYPE_MAIN_UNIT = 0x01,       // Fans
   FAN_TYPE_REMOTE_CONTROL = 0x03,  // Remote controls
-  FAN_TYPE_CO2_SENSOR = 0x18
-};  // CO2 sensors
+  FAN_TYPE_CO2_SENSOR = 0x18       // CO2 sensors
+};
 
 /* Fan commands */
 enum {
-  FAN_FRAME_SETVOLTAGE = 0x01,  // Set speed (voltage / percentage)
-  FAN_FRAME_SETSPEED = 0x02,    // Set speed (preset)
-  FAN_FRAME_SETTIMER = 0x03,    // Set speed with timer
+  FAN_FRAME_SETVOLTAGE = 0x01,     // Set speed (voltage / percentage)
+  FAN_FRAME_SETSPEED = 0x02,       // Set speed (preset)
+  FAN_FRAME_SETTIMER = 0x03,       // Set speed with timer
   FAN_NETWORK_JOIN_REQUEST = 0x04,
   FAN_FRAME_SETSPEED_REPLY = 0x05,
   FAN_NETWORK_JOIN_OPEN = 0x06,
-  FAN_TYPE_FAN_SETTINGS = 0x07,  // Current settings, sent by fan in reply to 0x01, 0x02, 0x10
+  FAN_TYPE_FAN_SETTINGS = 0x07,    // Current settings, sent by fan in reply to 0x01, 0x02, 0x10
   FAN_FRAME_0B = 0x0B,
   FAN_NETWORK_JOIN_ACK = 0x0C,
-  // FAN_NETWORK_JOIN_FINISH = 0x0D,
   FAN_TYPE_QUERY_NETWORK = 0x0D,
   FAN_TYPE_QUERY_DEVICE = 0x10,
   FAN_FRAME_SETVOLTAGE_REPLY = 0x1D
@@ -47,8 +53,8 @@ enum {
   FAN_SPEED_LOW = 0x01,     // Low:     30% or  3.0 volt
   FAN_SPEED_MEDIUM = 0x02,  // Medium:  50% or  5.0 volt
   FAN_SPEED_HIGH = 0x03,    // High:    90% or  9.0 volt
-  FAN_SPEED_MAX = 0x04
-};  // Max:    100% or 10.0 volt
+  FAN_SPEED_MAX = 0x04      // Max:    100% or 10.0 volt
+};
 
 #define NETWORK_LINK_ID 0xA55A5AA5
 #define NETWORK_DEFAULT_ID 0xE7E7E7E7
@@ -62,20 +68,15 @@ class ZehnderRF : public Component, public fan::Fan {
 
   void setup() override;
 
-  // Setup things
   void set_rf(nrf905::nRF905 *const pRf) { rf_ = pRf; }
-
   void set_update_interval(const uint32_t interval) { interval_ = interval; }
 
   void dump_config() override;
-
   fan::FanTraits get_traits() override;
   int get_speed_count() { return this->speed_count_; }
 
   void loop() override;
-
   void control(const fan::FanCall &call) override;
-
   float get_setup_priority() const override { return setup_priority::DATA; }
 
   void setSpeed(const uint8_t speed, const uint8_t timer = 0);
@@ -95,10 +96,21 @@ class ZehnderRF : public Component, public fan::Fan {
   void rfHandler(void);
   void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
 
+  // New member function declarations
+  void sendRfFrame(const uint8_t deviceType, const uint8_t ttl);
+  void fanSettingsReceived(const uint8_t speed, const uint8_t voltage, const uint8_t timer);
+  uint16_t calculate_crc16(uint8_t *data, size_t length);
+  void append_crc_to_payload(uint8_t *payload, size_t length);
+
+  // Error status member (if needed)
+  uint8_t error_status{0};
+
+  // State enum updated with missing states
   typedef enum {
     StateStartup,
     StateStartDiscovery,
     StateDiscoveryWaitForLinkRequest,
+    StateDiscoveryWaitForLinkAck,
     StateDiscoveryWaitForJoinResponse,
     StateDiscoveryJoinComplete,
 
@@ -106,6 +118,7 @@ class ZehnderRF : public Component, public fan::Fan {
     StateWaitQueryResponse,
     StateWaitSetSpeedResponse,
     StateWaitSetSpeedConfirm,
+    StateWaitQueryForUpdate, // Added missing state
 
     StateNrOf  // Keep last
   } State;
@@ -139,11 +152,13 @@ class ZehnderRF : public Component, public fan::Fan {
   uint8_t newTimer{0};
   bool newSetting{false};
 
+  // RfState enum with missing states
   typedef enum {
     RfStateIdle,            // Idle state
-    RfStateWaitAirwayFree,  // wait for airway free
-    RfStateTxBusy,          //
-    RfStateRxWait,
+    RfStateWaitAirwayFree,  // Wait for airway free
+    RfStateTxBusy,          // Transmitting busy state
+    RfStateRxWait,          // Receiving wait state
+    RfStateRxBusy,          // Receiving busy state
   } RfState;
   RfState rfState_{RfStateIdle};
 };
