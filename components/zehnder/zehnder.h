@@ -6,6 +6,7 @@
 #include "esphome/components/spi/spi.h"
 #include "esphome/components/fan/fan_state.h"
 #include "esphome/components/nrf905/nRF905.h"
+#include <cstdint>  // for uint8_t
 
 namespace esphome {
 namespace zehnder {
@@ -14,7 +15,7 @@ namespace zehnder {
 #define FAN_TX_FRAMES 4         // Retransmit every transmitted frame 4 times
 #define FAN_TX_RETRIES 10       // Retry transmission 10 times if no reply is received
 #define FAN_TTL 250             // 0xFA, default time-to-live for a frame
-#define FAN_REPLY_TIMEOUT 1000  // Wait 500ms for receiving a reply when doing a network scan
+#define FAN_REPLY_TIMEOUT 1000  // Wait 1000ms for receiving a reply when doing a network scan
 
 // Additional Fan Unit Types
 #define FAN_UNIT_TYPE_MAIN 0x01
@@ -75,7 +76,7 @@ class ZehnderRF : public Component, public fan::Fan {
   fan::FanTraits get_traits() override;
   int get_speed_count() { return this->speed_count_; }
 
-  void discoveryStart(unsigned char param); // Correct declaration
+  void discoveryStart(uint8_t deviceId); // Consistent use of uint8_t
 
   void loop() override;
   void control(const fan::FanCall &call) override;
@@ -92,7 +93,6 @@ class ZehnderRF : public Component, public fan::Fan {
   void queryDevice(void);
 
   uint8_t createDeviceID(void);
-  // void discoveryStart(const uint8_t deviceId); // Ensure there is no duplicate method
 
   Result startTransmit(const uint8_t *const pData, const int8_t rxRetries = -1,
                        const std::function<void(void)> callback = NULL);
@@ -100,16 +100,13 @@ class ZehnderRF : public Component, public fan::Fan {
   void rfHandler(void);
   void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
 
-  // New member function declarations
   void sendRfFrame(const uint8_t deviceType, const uint8_t ttl);
   void fanSettingsReceived(const uint8_t speed, const uint8_t voltage, const uint8_t timer);
   uint16_t calculate_crc16(uint8_t *data, size_t length);
   void append_crc_to_payload(uint8_t *payload, size_t length);
 
-  // Error status member (if needed)
   uint8_t error_status{0};
 
-  // State enum updated with missing states
   typedef enum {
     StateStartup,
     StateStartDiscovery,
@@ -122,9 +119,9 @@ class ZehnderRF : public Component, public fan::Fan {
     StateWaitQueryResponse,
     StateWaitSetSpeedResponse,
     StateWaitSetSpeedConfirm,
-    StateWaitQueryForUpdate, // Added missing state
+    StateWaitQueryForUpdate,
 
-    StateNrOf  // Keep last
+    StateNrOf
   } State;
   State state_{StateStartup};
   int speed_count_{};
@@ -156,13 +153,12 @@ class ZehnderRF : public Component, public fan::Fan {
   uint8_t newTimer{0};
   bool newSetting{false};
 
-  // RfState enum with missing states
   typedef enum {
-    RfStateIdle,            // Idle state
-    RfStateWaitAirwayFree,  // Wait for airway free
-    RfStateTxBusy,          // Transmitting busy state
-    RfStateRxWait,          // Receiving wait state
-    RfStateRxBusy,          // Receiving busy state
+    RfStateIdle,
+    RfStateWaitAirwayFree,
+    RfStateTxBusy,
+    RfStateRxWait,
+    RfStateRxBusy,
   } RfState;
   RfState rfState_{RfStateIdle};
 };
