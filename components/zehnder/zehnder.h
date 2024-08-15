@@ -75,7 +75,7 @@ class ZehnderRF : public Component, public fan::Fan {
   fan::FanTraits get_traits() override;
   int get_speed_count() { return this->speed_count_; }
 
-  void discoveryStart(unsigned char param);
+  void discoveryStart(unsigned char param); // Correct declaration
 
   void loop() override;
   void control(const fan::FanCall &call) override;
@@ -88,12 +88,11 @@ class ZehnderRF : public Component, public fan::Fan {
 
   uint8_t get_error_status() const { return error_status; }
 
-
  protected:
   void queryDevice(void);
 
   uint8_t createDeviceID(void);
-  void discoveryStart(const uint8_t deviceId);
+  void discoveryStart(const uint8_t deviceId); // Ensure there is no duplicate method
 
   Result startTransmit(const uint8_t *const pData, const int8_t rxRetries = -1,
                        const std::function<void(void)> callback = NULL);
