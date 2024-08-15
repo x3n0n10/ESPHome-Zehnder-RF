@@ -145,96 +145,19 @@ void ZehnderRF::dump_config(void) {
   ESP_LOGCONFIG(TAG, "  Fan my device id   0x%02X", this->config_.fan_my_device_id);
   ESP_LOGCONFIG(TAG, "  Fan main_unit type 0x%02X", this->config_.fan_main_unit_type);
   ESP_LOGCONFIG(TAG, "  Fan main unit id   0x%02X", this->config_.fan_main_unit_id);
-}
-
-void ZehnderRF::loop(void) {
-  uint8_t deviceId;
-  nrf905::Config rfConfig;
-
-  this->rfHandler();
-
-  switch (this->state_) {
-    case StateStartup:
-      if (millis() > 15000) {
-        if ((this->config_.fan_networkId == 0x00000000) || (this->config_.fan_my_device_type == 0) ||
-            (this->config_.fan_my_device_id == 0) || (this->config_.fan_main_unit_type == 0) ||
-            (this->config_.fan_main_unit_id == 0)) {
-          ESP_LOGD(TAG, "Invalid config, start pairing");
-
-          this->state_ = StateStartDiscovery;
-        } else {
-          ESP_LOGD(TAG, "Config data valid, start polling");
-
-          rfConfig = this->rf_->getConfig();
-          rfConfig.rx_address = this->config_.fan_networkId;
-          this->rf_->updateConfig(&rfConfig);
-          this->rf_->writeTxAddress(this->config_.fan_networkId);
-
-          this->queryDevice();
-        }
-      }
-      break;
-
-    case StateStartDiscovery:
-      deviceId = this->createDeviceID();
-      this->discoveryStart(deviceId);
-      break;
-
-    case StateIdle:
-      if (newSetting) {
-        this->setSpeed(newSpeed, newTimer);
-      } else {
-        if ((millis() - this->lastFanQuery_) > this->interval_) {
-          this->queryDevice();
-        }
-      }
-      break;
-
-    case StateWaitSetSpeedConfirm:
-      if (this->rfState_ == RfStateIdle) {
-        this->state_ = StateIdle;
-      }
-      break;
-
-    default:
-      break;
-  }
+  ESP_LOGCONFIG(TAG, "  Speed count        %u", this->speed_count_);
 }
 
 void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength) {
-  const RfFrame *const pResponse = (RfFrame *) pData;
-  RfFrame *const pTxFrame = (RfFrame *) this->_txFrame;
-  nrf905::Config rfConfig;
+  const RfFrame *const pResponse = reinterpret_cast<const RfFrame *>(pData);
 
-  ESP_LOGD(TAG, "Current state: 0x%02X", this->state_);
   switch (this->state_) {
     case StateDiscoveryWaitForLinkRequest:
       switch (pResponse->command) {
-        case FAN_NETWORK_JOIN_OPEN:
-          ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X (%s) with ID 0x%02X on network 0x%08X",
-                   pResponse->tx_type,
-                   pResponse->tx_type == FAN_UNIT_TYPE_REMOTE ? "Remote" : "Unknown", pResponse->tx_id,
-                   pResponse->payload.networkJoinOpen.networkId);
-
-          this->config_.fan_main_unit_type = pResponse->tx_type;
-          this->config_.fan_main_unit_id = pResponse->tx_id;
-          this->config_.fan_networkId = pResponse->payload.networkJoinOpen.networkId;
-
-          this->pref_.save(&this->config_);
-
-          pTxFrame->command = FAN_NETWORK_JOIN_REQUEST;
-          pTxFrame->parameter_count = sizeof(RfPayloadNetworkJoinRequest);
-          pTxFrame->payload.networkJoinRequest.networkId = pResponse->payload.networkJoinOpen.networkId;
-
-          this->sendRfFrame(FAN_UNIT_TYPE_REMOTE, FAN_NETWORK_LINK_TTL);
+        case FAN_NETWORK_JOIN_REQUEST:
+          ESP_LOGD(TAG, "Discovery: Request received from unit 0x%02X", pResponse->tx_id);
 
           this->state_ = StateDiscoveryWaitForLinkAck;
-
-          rfConfig = this->rf_->getConfig();
-          rfConfig.rx_address = this->config_.fan_networkId;
-          this->rf_->updateConfig(&rfConfig);
-          this->rf_->writeTxAddress(this->config_.fan_networkId);
-
           break;
       }
       break;
@@ -318,7 +241,7 @@ void ZehnderRF::setSpeed(const uint8_t speed, const uint8_t timer) {
   pFrame->payload.setTimer.speed = speed;
   pFrame->payload.setTimer.timer = timer;
 
-  this->sendRfFrame(FAN_UNIT_TYPE_REMOTE, FAN_NETWORK_LINK_TTL);
+  this->sendRfFrame(FAN_TYPE_REMOTE, FAN_TTL);
 
   this->state_ = StateWaitSetSpeedConfirm;
 }
@@ -333,7 +256,7 @@ void ZehnderRF::queryDevice(void) {
   pFrame->command = FAN_UPDATE_SETTINGS;
   pFrame->parameter_count = 0;
 
-  this->sendRfFrame(FAN_UNIT_TYPE_REMOTE, FAN_NETWORK_LINK_TTL);
+  this->sendRfFrame(FAN_TYPE_REMOTE, FAN_TTL);
 
   this->lastFanQuery_ = millis();  // Update time
   this->state_ = StateWaitQueryForUpdate;
@@ -376,8 +299,8 @@ void ZehnderRF::append_crc_to_payload(uint8_t *payload, size_t length) {
   payload[length - 1] = (crc >> 8) & 0xFF;
 }
 
-void ZehnderRF::discoveryStart(unsigned char param) {
-  ESP_LOGD(TAG, "Starting discovery with parameter: %u", param);
+void ZehnderRF::discoveryStart(uint8_t deviceId) {
+  ESP_LOGD(TAG, "Starting discovery with parameter: %u", deviceId);
 
   // Initialize the discovery frame
   RfFrame *const pFrame = (RfFrame *) this->_txFrame;
