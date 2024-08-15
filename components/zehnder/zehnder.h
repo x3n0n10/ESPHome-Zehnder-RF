@@ -87,7 +87,7 @@ class ZehnderRF : public Component, public fan::Fan {
   bool timer;
   int voltage;
 
-  uint8_t get_error_status() const { return error_status; }
+  // uint8_t get_error_status() const { return error_status; }
 
  protected:
   void queryDevice(void);
