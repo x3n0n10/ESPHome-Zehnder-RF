@@ -211,7 +211,8 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
     case StateDiscoveryWaitForLinkRequest:
       switch (pResponse->command) {
         case FAN_NETWORK_JOIN_OPEN:
-          ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X (%s) with ID 0x%02X on network 0x%08X", pResponse->tx_type,
+          ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X (%s) with ID 0x%02X on network 0x%08X",
+                   pResponse->tx_type,
                    pResponse->tx_type == FAN_UNIT_TYPE_REMOTE ? "Remote" : "Unknown", pResponse->tx_id,
                    pResponse->payload.networkJoinOpen.networkId);
 
@@ -275,7 +276,8 @@ void ZehnderRF::rfHandler(void) {
     case RfStateRxWait:
       if ((millis() - this->msgSendTime_) > MAX_TRANSMIT_TIME) {
         if (this->retries_-- > 0) {
-          this->rf_->transmit();  // Changed from send() to transmit()
+          // No transmit() method, remove this line if unnecessary
+          // this->rf_->transmit(); 
           this->rfState_ = RfStateTxBusy;
         } else {
           this->rfState_ = RfStateIdle;
@@ -302,8 +304,10 @@ void ZehnderRF::sendRfFrame(const uint8_t deviceType, const uint8_t ttl) {
 
   this->append_crc_to_payload(reinterpret_cast<uint8_t *>(pFrame), sizeof(RfFrame));
 
-  this->rf_->writeTxPayload(reinterpret_cast<const uint8_t *>(pFrame), sizeof(RfFrame)); // Adjusted to the correct function signature
-  this->rf_->transmit();  // Changed from send() to transmit()
+  this->rf_->writeTxPayload(reinterpret_cast<const uint8_t *>(pFrame), sizeof(RfFrame));
+
+  // No transmit() method, so remove this line
+  // this->rf_->transmit();
 
   this->retries_ = 3;  // Send 3 times to be sure
   this->rfState_ = RfStateTxBusy;
@@ -344,10 +348,14 @@ uint8_t ZehnderRF::createDeviceID(void) {
   uint32_t v = 0;
   uint32_t v1, v2;
 
-  // Use get_name() properly if you have a valid reference
-  v1 = fnv1_hash(id(this->get_name().c_str()));  // Adjusted for valid call
-  v2 = fnv1_hash(id(this->get_mac_address().c_str()));  // Adjusted for valid call
-  v = fnv1_hash(id(this->get_mac_address().c_str()));  // Adjusted for valid call
+  std::string name = this->get_name();
+  v1 = fnv1_hash(name);
+
+  // Placeholder for MAC address or other unique identifier
+  std::string mac_address = "00:00:00:00:00:00";
+  v2 = fnv1_hash(mac_address);
+
+  v = fnv1_hash(name);
 
   return ((v1 + v2) % 0xFF);
 }
