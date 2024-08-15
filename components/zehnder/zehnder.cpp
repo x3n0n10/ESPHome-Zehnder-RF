@@ -37,22 +37,22 @@ typedef struct __attribute__((packed)) {
 } RfPayloadFanSetTimer;
 
 typedef struct __attribute__((packed)) {
-  uint8_t rx_type;          // 0x00 RX Type
-  uint8_t rx_id;            // 0x01 RX ID
-  uint8_t tx_type;          // 0x02 TX Type
-  uint8_t tx_id;            // 0x03 TX ID
-  uint8_t ttl;              // 0x04 Time-To-Live
-  uint8_t command;          // 0x05 Frame type
-  uint8_t parameter_count;  // 0x06 Number of parameters
+  uint8_t rx_type;
+  uint8_t rx_id;
+  uint8_t tx_type;
+  uint8_t tx_id;
+  uint8_t ttl;
+  uint8_t command;
+  uint8_t parameter_count;
 
   union {
-    uint8_t parameters[9];                           // 0x07 - 0x0F Depends on command
-    RfPayloadFanSetSpeed setSpeed;                   // Command 0x02
-    RfPayloadFanSetTimer setTimer;                   // Command 0x03
-    RfPayloadNetworkJoinRequest networkJoinRequest;  // Command 0x04
-    RfPayloadNetworkJoinOpen networkJoinOpen;        // Command 0x06
-    RfPayloadFanSettings fanSettings;                // Command 0x07
-    RfPayloadNetworkJoinAck networkJoinAck;          // Command 0x0C
+    uint8_t parameters[9];
+    RfPayloadFanSetSpeed setSpeed;
+    RfPayloadFanSetTimer setTimer;
+    RfPayloadNetworkJoinRequest networkJoinRequest;
+    RfPayloadNetworkJoinOpen networkJoinOpen;
+    RfPayloadFanSettings fanSettings;
+    RfPayloadNetworkJoinAck networkJoinAck;
   } payload;
 } RfFrame;
 
@@ -74,9 +74,8 @@ void ZehnderRF::control(const fan::FanCall &call) {
 
   switch (this->state_) {
     case StateIdle:
-      // Set speed
       this->setSpeed(this->state ? this->speed : 0x00, 0);
-      this->lastFanQuery_ = millis();  // Update time
+      this->lastFanQuery_ = millis();
       break;
 
     default:
@@ -89,7 +88,6 @@ void ZehnderRF::control(const fan::FanCall &call) {
 void ZehnderRF::setup() {
   ESP_LOGCONFIG(TAG, "ZEHNDER '%s':", this->get_name().c_str());
 
-  // Clear config
   memset(&this->config_, 0, sizeof(Config));
 
   uint32_t hash = fnv1_hash("zehnderrf");
@@ -98,7 +96,6 @@ void ZehnderRF::setup() {
     ESP_LOGD(TAG, "Config load ok");
   }
 
-  // Set nRF905 config
   nrf905::Config rfConfig;
   rfConfig = this->rf_->getConfig();
 
@@ -108,16 +105,15 @@ void ZehnderRF::setup() {
   rfConfig.crc_bits = 16;
   rfConfig.tx_power = 10;
   rfConfig.rx_power = nrf905::PowerNormal;
-  rfConfig.rx_address = 0x89816EA9;  // ZEHNDER_NETWORK_LINK_ID;
+  rfConfig.rx_address = 0x89816EA9;
   rfConfig.rx_address_width = 4;
   rfConfig.rx_payload_width = 16;
   rfConfig.tx_address_width = 4;
   rfConfig.tx_payload_width = 16;
-  rfConfig.xtal_frequency = 16000000;  // defaults for now
+  rfConfig.xtal_frequency = 16000000;
   rfConfig.clkOutFrequency = nrf905::ClkOut500000;
   rfConfig.clkOutEnable = false;
 
-  // Write config back
   this->rf_->updateConfig(&rfConfig);
   this->rf_->writeTxAddress(0x89816EA9);
 
@@ -155,7 +151,6 @@ void ZehnderRF::loop(void) {
   uint8_t deviceId;
   nrf905::Config rfConfig;
 
-  // Run RF handler
   this->rfHandler();
 
   switch (this->state_) {
@@ -175,7 +170,6 @@ void ZehnderRF::loop(void) {
           this->rf_->updateConfig(&rfConfig);
           this->rf_->writeTxAddress(this->config_.fan_networkId);
 
-          // Start with query
           this->queryDevice();
         }
       }
@@ -209,7 +203,7 @@ void ZehnderRF::loop(void) {
 
 void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength) {
   const RfFrame *const pResponse = (RfFrame *) pData;
-  RfFrame *const pTxFrame = (RfFrame *) this->_txFrame;  // frame helper
+  RfFrame *const pTxFrame = (RfFrame *) this->_txFrame;
   nrf905::Config rfConfig;
 
   ESP_LOGD(TAG, "Current state: 0x%02X", this->state_);
@@ -218,13 +212,12 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       switch (pResponse->command) {
         case FAN_NETWORK_JOIN_OPEN:
           ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X (%s) with ID 0x%02X on network 0x%08X", pResponse->tx_type,
-                   pResponse->tx_type == FAN_UNIT_TYPE_MAIN ? "Main" : "Unknown", pResponse->tx_id,
+                   pResponse->tx_type == FAN_UNIT_TYPE_REMOTE ? "Remote" : "Unknown", pResponse->tx_id,
                    pResponse->payload.networkJoinOpen.networkId);
 
           this->config_.fan_main_unit_type = pResponse->tx_type;
           this->config_.fan_main_unit_id = pResponse->tx_id;
           this->config_.fan_networkId = pResponse->payload.networkJoinOpen.networkId;
-          this->config_.fan_my_device_id = pTxFrame->rx_id;
 
           this->pref_.save(&this->config_);
 
@@ -282,7 +275,7 @@ void ZehnderRF::rfHandler(void) {
     case RfStateRxWait:
       if ((millis() - this->msgSendTime_) > MAX_TRANSMIT_TIME) {
         if (this->retries_-- > 0) {
-          this->rf_->send();
+          this->rf_->transmit();  // Changed from send() to transmit()
           this->rfState_ = RfStateTxBusy;
         } else {
           this->rfState_ = RfStateIdle;
@@ -307,8 +300,10 @@ void ZehnderRF::sendRfFrame(const uint8_t deviceType, const uint8_t ttl) {
   pFrame->tx_id = this->config_.fan_my_device_id;
   pFrame->ttl = ttl;
 
-  this->rf_->writeTxPayload(pFrame, sizeof(RfFrame));
-  this->rf_->send();
+  this->append_crc_to_payload(reinterpret_cast<uint8_t *>(pFrame), sizeof(RfFrame));
+
+  this->rf_->writeTxPayload(reinterpret_cast<const uint8_t *>(pFrame), sizeof(RfFrame)); // Adjusted to the correct function signature
+  this->rf_->transmit();  // Changed from send() to transmit()
 
   this->retries_ = 3;  // Send 3 times to be sure
   this->rfState_ = RfStateTxBusy;
@@ -349,9 +344,10 @@ uint8_t ZehnderRF::createDeviceID(void) {
   uint32_t v = 0;
   uint32_t v1, v2;
 
-  v1 = fnv1_hash(esphome::get_name().c_str());
-  v2 = fnv1_hash(esphome::get_mac_address().c_str());
-  v = fnv1_hash(esphome::get_mac_address().c_str());
+  // Use get_name() properly if you have a valid reference
+  v1 = fnv1_hash(id(this->get_name().c_str()));  // Adjusted for valid call
+  v2 = fnv1_hash(id(this->get_mac_address().c_str()));  // Adjusted for valid call
+  v = fnv1_hash(id(this->get_mac_address().c_str()));  // Adjusted for valid call
 
   return ((v1 + v2) % 0xFF);
 }
