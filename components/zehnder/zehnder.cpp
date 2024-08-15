@@ -276,8 +276,6 @@ void ZehnderRF::rfHandler(void) {
     case RfStateRxWait:
       if ((millis() - this->msgSendTime_) > MAX_TRANSMIT_TIME) {
         if (this->retries_-- > 0) {
-          // No transmit() method, remove this line if unnecessary
-          // this->rf_->transmit(); 
           this->rfState_ = RfStateTxBusy;
         } else {
           this->rfState_ = RfStateIdle;
@@ -305,9 +303,6 @@ void ZehnderRF::sendRfFrame(const uint8_t deviceType, const uint8_t ttl) {
   this->append_crc_to_payload(reinterpret_cast<uint8_t *>(pFrame), sizeof(RfFrame));
 
   this->rf_->writeTxPayload(reinterpret_cast<const uint8_t *>(pFrame), sizeof(RfFrame));
-
-  // No transmit() method, so remove this line
-  // this->rf_->transmit();
 
   this->retries_ = 3;  // Send 3 times to be sure
   this->rfState_ = RfStateTxBusy;
@@ -379,6 +374,32 @@ void ZehnderRF::append_crc_to_payload(uint8_t *payload, size_t length) {
   uint16_t crc = this->calculate_crc16(payload, length - 2);
   payload[length - 2] = crc & 0xFF;
   payload[length - 1] = (crc >> 8) & 0xFF;
+}
+
+void ZehnderRF::discoveryStart(unsigned char param) {
+  ESP_LOGD(TAG, "Starting discovery with parameter: %u", param);
+
+  // Initialize the discovery frame
+  RfFrame *const pFrame = (RfFrame *) this->_txFrame;
+  
+  pFrame->rx_type = FAN_TYPE_BROADCAST;  // Broadcast to all devices
+  pFrame->rx_id = 0xFF;                  // Broadcast to all IDs
+  pFrame->tx_type = FAN_TYPE_MAIN_UNIT;  // Sending from main unit
+  pFrame->tx_id = this->config_.fan_my_device_id; // Set to device's ID
+  pFrame->ttl = FAN_TTL;                 // Set time-to-live for the frame
+  pFrame->command = FAN_NETWORK_JOIN_OPEN;
+  pFrame->parameter_count = sizeof(RfPayloadNetworkJoinOpen);
+  pFrame->payload.networkJoinOpen.networkId = this->config_.fan_networkId;
+
+  // Append CRC to the payload
+  this->append_crc_to_payload(reinterpret_cast<uint8_t *>(pFrame), sizeof(RfFrame));
+
+  // Send the frame
+  this->rf_->writeTxPayload(reinterpret_cast<const uint8_t *>(pFrame), sizeof(RfFrame));
+
+  // Update state
+  this->rfState_ = RfStateTxBusy;
+  this->msgSendTime_ = millis();  // Record the time when the message is sent
 }
 
 }  // namespace zehnder
