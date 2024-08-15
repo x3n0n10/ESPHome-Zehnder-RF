@@ -68,6 +68,7 @@ wifi:
     ssid: "${device_name} hotspot"
     password: !secret "zehnder_comfofan_ap_password"
 
+
 captive_portal:
 
 web_server:
@@ -138,13 +139,14 @@ text_sensor:
     id: "${device_id}_ventilation_mode"
     update_interval: 15s
     icon: mdi:information
-    lambda: !lambda 'switch (id(${device_id}_ventilation).speed) {
-                     case 1: return "Low";
-                     case 2: return "Medium";
-                     case 3: return "High";
-                     case 4: return "Max";
-                     default: return "Auto";
-                 }'
+    lambda: |-
+      switch (id(${device_id}_ventilation).speed) {
+        case 1: return {"Low"};
+        case 2: return {"Medium"};
+        case 3: return {"High"};
+        case 4: return {"Max"};
+        default: return {"Auto"};
+      }
 
 switch:
   - platform: safe_mode
@@ -212,7 +214,7 @@ button:
 
 # Load external components
 external_components:
-  - source: github://bramboe/ESPHome-Zehnder-RF
+  - source: github://TimelessNL/ESPHome-Zehnder-RF
     components: [ nrf905, zehnder ]
     refresh: 0s
 
@@ -247,13 +249,14 @@ fan:
           state: !lambda 'return id(${device_id}_ventilation).timer;'
       - text_sensor.template.publish:
           id: ${device_id}_ventilation_mode
-          state: !lambda 'switch (id(${device_id}_ventilation).speed) {
-                             case 1: return "Low";
-                             case 2: return "Medium";
-                             case 3: return "High";
-                             case 4: return "Max";
-                             default: return "Auto";
-                         }'
+          state: !lambda |-
+            switch (id(${device_id}_ventilation).speed) {
+              case 1: return {"Low"};
+              case 2: return {"Medium"};
+              case 3: return {"High"};
+              case 4: return {"Max"};
+              default: return {"Auto"};
+            }
       - sensor.template.publish:
           id: ${device_id}_error_status
           state: !lambda 'return id(${device_id}_ventilation).get_error_status();'
