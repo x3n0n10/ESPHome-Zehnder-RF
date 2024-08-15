@@ -26,6 +26,7 @@ typedef struct __attribute__((packed)) {
   uint8_t speed;
   uint8_t voltage;
   uint8_t timer;
+  uint8_t get_error_status;
 } RfPayloadFanSettings;
 
 typedef struct __attribute__((packed)) {
