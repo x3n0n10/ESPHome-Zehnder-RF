@@ -75,6 +75,8 @@ class ZehnderRF : public Component, public fan::Fan {
   fan::FanTraits get_traits() override;
   int get_speed_count() { return this->speed_count_; }
 
+  void discoveryStart(unsigned char param);
+
   void loop() override;
   void control(const fan::FanCall &call) override;
   float get_setup_priority() const override { return setup_priority::DATA; }
