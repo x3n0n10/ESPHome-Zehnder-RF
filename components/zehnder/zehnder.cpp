@@ -62,7 +62,6 @@ ZehnderRF::ZehnderRF() : rf_(nullptr), interval_(1000), speed_count_(0), state_(
 void ZehnderRF::setup() {
   ESP_LOGCONFIG(TAG, "Setting up ZehnderRF...");
 
-  // Initialize RF configuration
   if (this->rf_) {
     nrf905::Config rfConfig;
     rfConfig.band = true;
@@ -118,14 +117,14 @@ void ZehnderRF::dump_config() {
 fan::FanTraits ZehnderRF::get_traits() {
   fan::FanTraits traits;
   traits.set_speed_count(this->speed_count_);
-  traits.set_supports_speed(true);
+  traits.supports_speed(true);
   return traits;
 }
 
 // Handle control commands
 void ZehnderRF::control(const fan::FanCall &call) {
   if (call.get_state().has_value()) {
-    this->state_ = *call.get_state() == fan::FanState::STATE_ON ? StateActive : StateIdle;
+    this->state_ = *call.get_state() == fan::FanState::ON ? StateActive : StateIdle;
   }
 
   if (call.get_speed().has_value()) {
@@ -216,29 +215,22 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       break;
 
     case StateIdle:
-      if (pResponse->command == FAN_UPDATE_SETTINGS) {
-        if ((pResponse->tx_type == this->config_.fan_main_unit_type) &&
-            (pResponse->tx_id == this->config_.fan_main_unit_id)) {
-          this->fanSettingsReceived(pResponse->payload.fanSettings.speed,
-                                    pResponse->payload.fanSettings.voltage,
-                                    pResponse->payload.fanSettings.timer);
-        }
-      }
+      break;
+
+    default:
+      ESP_LOGE(TAG, "Unhandled state %d", this->state_);
       break;
   }
 }
 
 // Send RF frame
-void ZehnderRF::sendRfFrame(const uint8_t deviceType, const uint8_t ttl) {
+void ZehnderRF::sendRfFrame(const uint8_t txType, const uint8_t txId) {
   RfFrame *const pFrame = (RfFrame *) this->_txFrame;
 
-  pFrame->rx_type = this->config_.fan_main_unit_type;
-  pFrame->rx_id = this->config_.fan_main_unit_id;
-  pFrame->tx_type = deviceType;
-  pFrame->tx_id = this->config_.fan_my_device_id;
-  pFrame->ttl = ttl;
-
-  this->append_crc_to_payload(reinterpret_cast<uint8_t *>(pFrame), sizeof(*pFrame));
+  pFrame->tx_type = txType;
+  pFrame->tx_id = txId;
+  pFrame->ttl = 3; // Set appropriate TTL
+  pFrame->command = FAN_COMMAND;
 
   this->rf_->send(reinterpret_cast<uint8_t *>(pFrame), sizeof(*pFrame));
 }
