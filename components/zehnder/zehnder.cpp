@@ -9,7 +9,6 @@ namespace zehnder {
 
 static const char *const TAG = "zehnder";
 
-// Define the RF payload structures
 typedef struct __attribute__((packed)) {
   uint32_t networkId;
 } RfPayloadNetworkJoinOpen;
@@ -152,7 +151,7 @@ void ZehnderRF::loop(void) {
   uint8_t deviceId;
   nrf905::Config rfConfig;
 
-  this->rfHandler();  // Handle RF communication and state updates
+  this->rfHandler();
 
   switch (this->state_) {
     case StateStartup:
