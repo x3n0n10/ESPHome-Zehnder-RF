@@ -5,8 +5,6 @@
 namespace esphome {
 namespace zehnder {
 
-#define MAX_TRANSMIT_TIME 2000
-
 static const char *const TAG = "zehnder";
 
 // Define RF payload structures
@@ -169,9 +167,8 @@ void ZehnderRF::sendSpeed() {
 
 // Update error status
 void ZehnderRF::update_error_status() {
-  if (millis() - last_successful_communication > FAN_REPLY_TIMEOUT) {
-    error_code = E01_COMMUNICATION_ERROR;
-  } else if (/* Fan malfunction condition */) {
+  // Placeholder for error conditions
+  if (/* Fan malfunction condition */) {
     error_code = E03_FAN_MALFUNCTION;
   } else if (filter_runtime > /* threshold */) {
     error_code = E05_FILTER_REPLACEMENT_NEEDED;
