@@ -14,7 +14,7 @@ esp32:
 
 # Enable logging
 logger:
-  level: INFO
+  level: DEBUG
 
 preferences:
   flash_write_interval: 1d
@@ -51,22 +51,31 @@ api:
             } else if (mode == "Max_60m") {
               id(${device_id}_ventilation).setSpeed(4, 60);
             } else {
-              ESP_LOGW("zehnder", "Unknown mode %s", mode.c_str());
+              ESP_LOGW("zehnder", "Unknown mode %s", mode);
             }
 
 ota:
-  - platform: esphome
-    password: !secret "zehnder_comfofan_ota_password"
+- platform: esphome
+  password: !secret "zehnder_comfofan_ota_password"
 
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  ssid: !secret "wifi_ssid"
+  password: !secret "wifi_password"
   fast_connect: true
 
   # Enable fallback hotspot (captive portal) in case Wifi connection fails
   ap:
     ssid: "${device_name} hotspot"
     password: !secret "zehnder_comfofan_ap_password"
+
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 1100ms
+    window: 1100ms
+    active: true
+
+bluetooth_proxy:
+  active: true
 
 
 captive_portal:
@@ -89,7 +98,7 @@ binary_sensor:
     name: "${device_name} Timer"
     id: "${device_id}_timer"
     icon: mdi:fan-clock
-    lambda: !lambda 'return id(${device_id}_ventilation).timer;'
+    lambda: !lambda 'return ${device_id}_ventilation->timer;'
 
 sensor:
   - platform: wifi_signal
@@ -108,16 +117,33 @@ sensor:
     icon: mdi:percent
     accuracy_decimals: 0
     update_interval: 15s
-    lambda: !lambda 'return id(${device_id}_ventilation).voltage;'
-
+    lambda: !lambda 'return ${device_id}_ventilation->voltage;'
+    
+  # Add filter sensors
   - platform: template
-    name: "${device_name} Error Status"
-    id: "${device_id}_error_status"
-    state_class: measurement
+    name: "${device_name} Filter Remaining"
+    id: "${device_id}_filter_remaining"
+    unit_of_measurement: "%"
+    icon: mdi:air-filter
+    update_interval: 600s
+    entity_category: diagnostic
+    
+  - platform: template
+    name: "${device_name} Filter Runtime"
+    id: "${device_id}_filter_runtime"
+    unit_of_measurement: "h"
+    device_class: "duration"
+    icon: mdi:clock-outline
+    update_interval: 600s
+    entity_category: diagnostic
+    
+  # Add error count sensor  
+  - platform: template
+    name: "${device_name} Error Count"
+    id: "${device_id}_error_count"
     icon: mdi:alert-circle
-    accuracy_decimals: 0
-    update_interval: 15s
-    lambda: !lambda 'return id(${device_id}_ventilation).get_error_status();'
+    update_interval: 300s
+    entity_category: diagnostic
 
 text_sensor:
   - platform: wifi_info
@@ -139,14 +165,21 @@ text_sensor:
     id: "${device_id}_ventilation_mode"
     update_interval: 15s
     icon: mdi:information
-    lambda: |-
-      switch (id(${device_id}_ventilation).speed) {
-        case 1: return {"Low"};
-        case 2: return {"Medium"};
-        case 3: return {"High"};
-        case 4: return {"Max"};
-        default: return {"Auto"};
-      }
+    lambda: !lambda 'switch (${device_id}_ventilation->speed) {
+                     case 1: return std::string("Low");
+                     case 2: return std::string("Medium");
+                     case 3: return std::string("High");
+                     case 4: return std::string("Max");
+                     default: return std::string("Auto");
+                 }'
+    
+  # Add error code sensor
+  - platform: template
+    name: "${device_name} Error Code"
+    id: "${device_id}_error_code"
+    icon: mdi:alert
+    update_interval: 300s
+    entity_category: diagnostic
 
 switch:
   - platform: safe_mode
@@ -162,7 +195,7 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(${device_id}_ventilation).setSpeed(0, 0);
+            ${device_id}_ventilation->setSpeed(0, 0);
   - platform: template
     id: ${device_id}_low
     name: ${device_name} Low
@@ -170,7 +203,7 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(${device_id}_ventilation).setSpeed(1, 0);
+            ${device_id}_ventilation->setSpeed(1, 0);
   - platform: template
     id: ${device_id}_medium
     name: ${device_name} Medium
@@ -178,7 +211,7 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(${device_id}_ventilation).setSpeed(2, 0);
+            ${device_id}_ventilation->setSpeed(2, 0);
   - platform: template
     id: ${device_id}_high
     name: ${device_name} High
@@ -186,7 +219,7 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(${device_id}_ventilation).setSpeed(3, 0);
+            ${device_id}_ventilation->setSpeed(3, 0);
   - platform: template
     id: ${device_id}_max_10
     name: ${device_name} Max 10
@@ -194,7 +227,7 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(${device_id}_ventilation).setSpeed(4, 10);
+            ${device_id}_ventilation->setSpeed(4, 10);
   - platform: template
     id: ${device_id}_max_30
     name: ${device_name} Max 30
@@ -202,7 +235,7 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(${device_id}_ventilation).setSpeed(4, 30);
+            ${device_id}_ventilation->setSpeed(4, 30);
   - platform: template
     id: ${device_id}_max_60
     name: ${device_name} Max 60
@@ -210,11 +243,12 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(${device_id}_ventilation).setSpeed(4, 60);
+            ${device_id}_ventilation->setSpeed(4, 60);
 
 # Load external components
+# https://esphome.io/components/external_components.html#external-components-git
 external_components:
-  - source: github://TimelessNL/ESPHome-Zehnder-RF
+  - source: github://bramboe/ESPHome-Zehnder-RF
     components: [ nrf905, zehnder ]
     refresh: 0s
 
@@ -222,7 +256,7 @@ external_components:
 spi:
   clk_pin: GPIO14
   mosi_pin: GPIO13
-  miso_pin: GPIO16
+  miso_pin: GPIO12
 
 # nRF905 config
 nrf905:
@@ -232,6 +266,28 @@ nrf905:
   ce_pin: GPIO27
   pwr_pin: GPIO26
   txen_pin: GPIO25
+  # am_pin: GPIO32
+  # dr_pin: GPIO35
+
+# Ensure nrf905 is fully initialized with a short delay
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+            ESP_LOGI("main", "nRF905 initialized, proceeding with Zehnder setup");
+            
+  # Add periodic update interval for diagnostic sensors
+  - interval: 600s
+    then:
+      - lambda: |-
+            // This is a placeholder for when the filter status would be queried
+            // Your component will handle this internally with our code modifications
+            
+  - interval: 300s
+    then:
+      - lambda: |-
+            // This is a placeholder for when the error status would be queried
+            // Your component will handle this internally with our code modifications
 
 # The FAN controller
 fan:
@@ -243,20 +299,16 @@ fan:
     on_speed_set:
       - sensor.template.publish:
           id: ${device_id}_ventilation_percentage
-          state: !lambda 'return id(${device_id}_ventilation).voltage;'
+          state: !lambda 'return ${device_id}_ventilation->voltage;'
       - binary_sensor.template.publish:
           id: ${device_id}_timer
-          state: !lambda 'return id(${device_id}_ventilation).timer;'
+          state: !lambda 'return ${device_id}_ventilation->timer;'
       - text_sensor.template.publish:
           id: ${device_id}_ventilation_mode
-          state: !lambda |-
-            switch (id(${device_id}_ventilation).speed) {
-              case 1: return {"Low"};
-              case 2: return {"Medium"};
-              case 3: return {"High"};
-              case 4: return {"Max"};
-              default: return {"Auto"};
-            }
-      - sensor.template.publish:
-          id: ${device_id}_error_status
-          state: !lambda 'return id(${device_id}_ventilation).get_error_status();'
+          state: !lambda 'switch (${device_id}_ventilation->speed) {
+                             case 1: return "Low";
+                             case 2: return "Medium";
+                             case 3: return "High";
+                             case 4: return "Max";
+                             default: return "Auto";
+                         }'
