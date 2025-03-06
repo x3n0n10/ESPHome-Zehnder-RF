@@ -6,7 +6,8 @@
 #include "esphome/components/spi/spi.h"
 #include "esphome/components/fan/fan_state.h"
 #include "esphome/components/nrf905/nRF905.h"
-#include <cstdint>  // for uint8_t
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 
 namespace esphome {
 namespace zehnder {
@@ -15,37 +16,37 @@ namespace zehnder {
 #define FAN_TX_FRAMES 4         // Retransmit every transmitted frame 4 times
 #define FAN_TX_RETRIES 10       // Retry transmission 10 times if no reply is received
 #define FAN_TTL 250             // 0xFA, default time-to-live for a frame
-#define FAN_REPLY_TIMEOUT 1000  // Wait 1000ms for receiving a reply when doing a network scan
-
-// Additional Fan Unit Types
-#define FAN_UNIT_TYPE_MAIN 0x01
-#define FAN_UNIT_TYPE_REMOTE 0x02
-#define FAN_NETWORK_LINK_TTL 3
-#define FAN_UPDATE_SETTINGS 0x07
-#define FAN_SET_SPEED_TIMER 0x03
+#define FAN_REPLY_TIMEOUT 1000  // Wait 500ms for receiving a reply when doing a network scan
 
 /* Fan device types */
 enum {
   FAN_TYPE_BROADCAST = 0x00,       // Broadcast to all devices
   FAN_TYPE_MAIN_UNIT = 0x01,       // Fans
   FAN_TYPE_REMOTE_CONTROL = 0x03,  // Remote controls
-  FAN_TYPE_CO2_SENSOR = 0x18       // CO2 sensors
-};
+  FAN_TYPE_CO2_SENSOR = 0x18
+};  // CO2 sensors
 
 /* Fan commands */
 enum {
-  FAN_FRAME_SETVOLTAGE = 0x01,     // Set speed (voltage / percentage)
-  FAN_FRAME_SETSPEED = 0x02,       // Set speed (preset)
-  FAN_FRAME_SETTIMER = 0x03,       // Set speed with timer
+  FAN_FRAME_SETVOLTAGE = 0x01,  // Set speed (voltage / percentage)
+  FAN_FRAME_SETSPEED = 0x02,    // Set speed (preset)
+  FAN_FRAME_SETTIMER = 0x03,    // Set speed with timer
   FAN_NETWORK_JOIN_REQUEST = 0x04,
   FAN_FRAME_SETSPEED_REPLY = 0x05,
   FAN_NETWORK_JOIN_OPEN = 0x06,
-  FAN_TYPE_FAN_SETTINGS = 0x07,    // Current settings, sent by fan in reply to 0x01, 0x02, 0x10
+  FAN_TYPE_FAN_SETTINGS = 0x07,  // Current settings, sent by fan in reply to 0x01, 0x02, 0x10
   FAN_FRAME_0B = 0x0B,
   FAN_NETWORK_JOIN_ACK = 0x0C,
+  // FAN_NETWORK_JOIN_FINISH = 0x0D,
   FAN_TYPE_QUERY_NETWORK = 0x0D,
   FAN_TYPE_QUERY_DEVICE = 0x10,
-  FAN_FRAME_SETVOLTAGE_REPLY = 0x1D
+  FAN_FRAME_SETVOLTAGE_REPLY = 0x1D,
+
+  // New diagnostic commands (actual command codes would need to be discovered)
+  FAN_TYPE_QUERY_ERROR_STATUS = 0x30,    // Request error codes
+  FAN_TYPE_ERROR_STATUS_RESPONSE = 0x31, // Response with error codes
+  FAN_TYPE_QUERY_FILTER_STATUS = 0x32,   // Request filter status
+  FAN_TYPE_FILTER_STATUS_RESPONSE = 0x33 // Response with filter status
 };
 
 /* Fan speed presets */
@@ -54,8 +55,8 @@ enum {
   FAN_SPEED_LOW = 0x01,     // Low:     30% or  3.0 volt
   FAN_SPEED_MEDIUM = 0x02,  // Medium:  50% or  5.0 volt
   FAN_SPEED_HIGH = 0x03,    // High:    90% or  9.0 volt
-  FAN_SPEED_MAX = 0x04      // Max:    100% or 10.0 volt
-};
+  FAN_SPEED_MAX = 0x04
+};  // Max:    100% or 10.0 volt
 
 #define NETWORK_LINK_ID 0xA55A5AA5
 #define NETWORK_DEFAULT_ID 0xE7E7E7E7
@@ -69,17 +70,26 @@ class ZehnderRF : public Component, public fan::Fan {
 
   void setup() override;
 
+  // Setup things
   void set_rf(nrf905::nRF905 *const pRf) { rf_ = pRf; }
+
   void set_update_interval(const uint32_t interval) { interval_ = interval; }
 
+  // Sensors
+  void set_filter_remaining_sensor(sensor::Sensor *sensor) { filter_remaining_sensor_ = sensor; }
+  void set_filter_runtime_sensor(sensor::Sensor *sensor) { filter_runtime_sensor_ = sensor; }
+  void set_error_count_sensor(sensor::Sensor *sensor) { error_count_sensor_ = sensor; }
+  void set_error_code_sensor(text_sensor::TextSensor *sensor) { error_code_sensor_ = sensor; }
+
   void dump_config() override;
+
   fan::FanTraits get_traits() override;
   int get_speed_count() { return this->speed_count_; }
 
-  void discoveryStart(uint8_t deviceId); // Consistent use of uint8_t
-
   void loop() override;
+
   void control(const fan::FanCall &call) override;
+
   float get_setup_priority() const override { return setup_priority::DATA; }
 
   void setSpeed(const uint8_t speed, const uint8_t timer = 0);
@@ -87,12 +97,13 @@ class ZehnderRF : public Component, public fan::Fan {
   bool timer;
   int voltage;
 
-  uint8_t get_error_status() const { return error_status; }
-
  protected:
   void queryDevice(void);
+  void queryErrorStatus(void);
+  void queryFilterStatus(void);
 
   uint8_t createDeviceID(void);
+  void discoveryStart(const uint8_t deviceId);
 
   Result startTransmit(const uint8_t *const pData, const int8_t rxRetries = -1,
                        const std::function<void(void)> callback = NULL);
@@ -100,18 +111,10 @@ class ZehnderRF : public Component, public fan::Fan {
   void rfHandler(void);
   void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
 
-  void sendRfFrame(const uint8_t deviceType, const uint8_t ttl);
-  void fanSettingsReceived(const uint8_t speed, const uint8_t voltage, const uint8_t timer);
-  uint16_t calculate_crc16(uint8_t *data, size_t length);
-  void append_crc_to_payload(uint8_t *payload, size_t length);
-
-  uint8_t error_status{0};
-
   typedef enum {
     StateStartup,
     StateStartDiscovery,
     StateDiscoveryWaitForLinkRequest,
-    StateDiscoveryWaitForLinkAck,
     StateDiscoveryWaitForJoinResponse,
     StateDiscoveryJoinComplete,
 
@@ -119,15 +122,24 @@ class ZehnderRF : public Component, public fan::Fan {
     StateWaitQueryResponse,
     StateWaitSetSpeedResponse,
     StateWaitSetSpeedConfirm,
-    StateWaitQueryForUpdate,
 
-    StateNrOf
+    // New states
+    StateWaitFilterStatusResponse,
+    StateWaitErrorStatusResponse,
+
+    StateNrOf  // Keep last
   } State;
   State state_{StateStartup};
   int speed_count_{};
 
   nrf905::nRF905 *rf_;
   uint32_t interval_;
+
+  // Sensors
+  sensor::Sensor *filter_remaining_sensor_{nullptr};
+  sensor::Sensor *filter_runtime_sensor_{nullptr};
+  sensor::Sensor *error_count_sensor_{nullptr};
+  text_sensor::TextSensor *error_code_sensor_{nullptr};
 
   uint8_t _txFrame[FAN_FRAMESIZE];
 
@@ -143,6 +155,8 @@ class ZehnderRF : public Component, public fan::Fan {
   Config config_;
 
   uint32_t lastFanQuery_{0};
+  uint32_t lastFilterQuery_{0};
+  uint32_t lastErrorQuery_{0};
   std::function<void(void)> onReceiveTimeout_ = NULL;
 
   uint32_t msgSendTime_{0};
@@ -154,14 +168,26 @@ class ZehnderRF : public Component, public fan::Fan {
   bool newSetting{false};
 
   typedef enum {
-    RfStateIdle,
-    RfStateWaitAirwayFree,
-    RfStateTxBusy,
+    RfStateIdle,            // Idle state
+    RfStateWaitAirwayFree,  // wait for airway free
+    RfStateTxBusy,          //
     RfStateRxWait,
-    RfStateRxBusy,
   } RfState;
   RfState rfState_{RfStateIdle};
 };
+
+// New payload structures
+typedef struct __attribute__((packed)) {
+  uint8_t errorCount;      // Number of active errors
+  uint8_t errorCodes[5];   // Array of error codes
+  uint8_t errorSeverity;   // Severity level (warning/critical)
+} RfPayloadErrorStatus;
+
+typedef struct __attribute__((packed)) {
+  uint16_t totalRunHours;       // Total operation hours
+  uint16_t filterRunHours;      // Hours since last filter change
+  uint8_t filterPercentRemaining; // Filter life remaining percentage
+} RfPayloadFilterStatus;
 
 }  // namespace zehnder
 }  // namespace esphome
