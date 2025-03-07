@@ -312,7 +312,7 @@ void ZehnderRF::queryFilterStatus(void) {
   pFrame->tx_type = this->config_.fan_my_device_type;
   pFrame->tx_id = this->config_.fan_my_device_id;
   pFrame->ttl = FAN_TTL;
-  pFrame->command = FAN_TYPE_QUERY_FILTER_STATUS;
+  pFrame->command = 0x1C;  // Updated command for filter status
   pFrame->parameter_count = 0x00;  // No parameters
 
   ESP_LOGI(TAG, "  Sending Filter Query Command: 0x%02X", pFrame->command);
@@ -466,27 +466,35 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       break;
 
     case StateWaitFilterStatusResponse:
-      if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
-          (pResponse->rx_id == this->config_.fan_my_device_id)) {      // and id match, it is for us
+      if ((pResponse->rx_type == this->config_.fan_my_device_type) &&
+          (pResponse->rx_id == this->config_.fan_my_device_id)) {
         switch (pResponse->command) {
-          case FAN_TYPE_FILTER_STATUS_RESPONSE: {
-            const RfPayloadFilterStatus* filterStatus =
-                reinterpret_cast<const RfPayloadFilterStatus*>(&pResponse->payload);
+          case 0x1C: {  // New filter status response command
+            ESP_LOGI(TAG, "Received filter days since last change");
 
-            ESP_LOGD(TAG, "Received filter status; total hours: %u, filter hours: %u, remaining: %u%%",
-                     filterStatus->totalRunHours, filterStatus->filterRunHours,
-                     filterStatus->filterPercentRemaining);
+            // Log all payload bytes for investigation
+            for (int i = 0; i < pResponse->parameter_count; i++) {
+              ESP_LOGI(TAG, "  Raw Payload Byte %d: 0x%02X",
+                       i, pResponse->payload.parameters[i]);
+            }
+
+            // Example: Assuming first byte represents days since filter change
+            if (pResponse->parameter_count > 0) {
+              uint8_t days_since_filter_change = pResponse->payload.parameters[0];
+
+              if (this->filter_remaining_sensor_ != nullptr) {
+                // You might want to calculate a percentage based on your specific filter
+                // This is just an example - adjust calculation as needed
+                uint8_t filter_percent_remaining = 100 - (days_since_filter_change * 10);
+                this->filter_remaining_sensor_->publish_state(filter_percent_remaining);
+              }
+
+              if (this->filter_runtime_sensor_ != nullptr) {
+                this->filter_runtime_sensor_->publish_state(days_since_filter_change);
+              }
+            }
 
             this->rfComplete();
-
-            // Update sensor values if you've added them
-            if (this->filter_remaining_sensor_ != nullptr) {
-              this->filter_remaining_sensor_->publish_state(filterStatus->filterPercentRemaining);
-            }
-            if (this->filter_runtime_sensor_ != nullptr) {
-              this->filter_runtime_sensor_->publish_state(filterStatus->filterRunHours);
-            }
-
             this->state_ = StateIdle;
             break;
           }
