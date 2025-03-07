@@ -113,12 +113,6 @@ public:
   void queryErrorStatus(void);
   void queryFilterStatus(void);
 
-  // Sensor connection methods
-  void set_error_count_sensor(sensor::Sensor *sensor) { error_count_sensor_ = sensor; }
-  void set_error_code_sensor(text_sensor::TextSensor *sensor) { error_code_sensor_ = sensor; }
-  void set_filter_remaining_sensor(sensor::Sensor *sensor) { filter_remaining_sensor_ = sensor; }
-  void set_filter_runtime_sensor(sensor::Sensor *sensor) { filter_runtime_sensor_ = sensor; }
-
  protected:
   uint8_t createDeviceID(void);
   void discoveryStart(const uint8_t deviceId);
@@ -157,12 +151,6 @@ public:
 
   nrf905::nRF905 *rf_;
   uint32_t interval_;
-
-  // Sensors
-  sensor::Sensor *filter_remaining_sensor_{nullptr};
-  sensor::Sensor *filter_runtime_sensor_{nullptr};
-  sensor::Sensor *error_count_sensor_{nullptr};
-  text_sensor::TextSensor *error_code_sensor_{nullptr};
 
   uint8_t _txFrame[FAN_FRAMESIZE];
 
