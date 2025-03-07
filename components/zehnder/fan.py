@@ -2,11 +2,15 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import fan, sensor, text_sensor
 from esphome.const import (
-    CONF_ID, 
+    CONF_ID,
     CONF_UPDATE_INTERVAL,
     DEVICE_CLASS_DURATION,
     UNIT_HOUR,
     UNIT_PERCENT,
+    ICON_TIMER,
+    ICON_PERCENT,
+    ICON_ALERT_CIRCLE,
+    ICON_ALERT
 )
 
 from esphome.components.nrf905 import nRF905Component
@@ -31,20 +35,20 @@ CONFIG_SCHEMA = fan.FAN_SCHEMA.extend(
         # Filter status sensors
         cv.Optional(CONF_FILTER_REMAINING): sensor.sensor_schema(
             unit_of_measurement=UNIT_PERCENT,
-            icon="mdi:percent",
+            icon=ICON_PERCENT,
         ),
         cv.Optional(CONF_FILTER_RUNTIME): sensor.sensor_schema(
             unit_of_measurement=UNIT_HOUR,
-            device_class=DEVICE_CLASS_DURATION, 
-            icon="mdi:timer",
+            device_class=DEVICE_CLASS_DURATION,
+            icon=ICON_TIMER,
         ),
 
         # Error sensors
         cv.Optional(CONF_ERROR_COUNT): sensor.sensor_schema(
-            icon="mdi:alert-circle",
+            icon=ICON_ALERT_CIRCLE,
         ),
         cv.Optional(CONF_ERROR_CODE): text_sensor.text_sensor_schema(
-            icon="mdi:alert",
+            icon=ICON_ALERT,
         ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
