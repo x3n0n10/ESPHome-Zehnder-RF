@@ -29,6 +29,10 @@ void nRF905::setup() {
     this->_gpio_pin_dr->setup();
   }
   this->_gpio_pin_pwr->setup();
+  this->_gpio_pin_pwr->digital_write(false);
+  delay(100);  // Wait 100ms
+  this->_gpio_pin_pwr->digital_write(true);
+  delay(100);  // Wait for module to stabilize
   this->_gpio_pin_txen->setup();
 
   this->setMode(PowerDown);
@@ -48,7 +52,7 @@ void nRF905::setup() {
   // RX power normal
   this->_config.rx_power = PowerNormal;
 
-  this->_config.rx_address = 0x89816EA9;  // ZEHNDER_NETWORK_LINK_ID;
+  this->_config.rx_address = 0xA55A5AA5;  // ZEHNDER_NETWORK_LINK_ID;
   this->_config.rx_address_width = 4;
   this->_config.rx_payload_width = 16;
 
@@ -61,7 +65,7 @@ void nRF905::setup() {
 
   // Write config back
   this->writeConfigRegisters();
-  this->writeTxAddress(0x89816EA9);
+  this->writeTxAddress(0xA55A5AA5);
 
   // Return to idle
   this->setMode(Idle);
@@ -545,13 +549,13 @@ void nRF905::startTx(const uint32_t retransmit, const Mode nextMode) {
   this->nextMode = nextMode;
 
   // Set or clear retransmit flag
-  // if ((this->_config.auto_retransmit == false) && (retransmit > 0)) {
-  //   this->_config.auto_retransmit = true;
-  //   update = true;
-  // } else if ((this->_config.auto_retransmit == true) && (retransmit == 0)) {
-  this->_config.auto_retransmit = false;
-  update = true;
-  // }
+  if ((this->_config.auto_retransmit == false) && (retransmit > 0)) {
+    this->_config.auto_retransmit = true;
+    update = true;
+  } else if ((this->_config.auto_retransmit == true) && (retransmit == 0)) {
+    this->_config.auto_retransmit = false;
+    update = true;
+  }
   if (update == true) {
     this->writeConfigRegisters();
   }
