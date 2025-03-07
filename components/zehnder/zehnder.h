@@ -109,12 +109,11 @@ class ZehnderRF : public Component, public fan::Fan {
   int voltage;
 
 public:
+  void queryDevice(void);
   void queryErrorStatus(void);
   void queryFilterStatus(void);
 
  protected:
-  void queryDevice(void);
-
   uint8_t createDeviceID(void);
   void discoveryStart(const uint8_t deviceId);
 
