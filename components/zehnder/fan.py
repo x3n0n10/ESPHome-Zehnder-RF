@@ -9,8 +9,9 @@ from esphome.const import (
     UNIT_PERCENT,
     ICON_TIMER,
     ICON_PERCENT,
-    ICON_ALERT_CIRCLE,
-    ICON_ALERT
+    # Replace missing icon constants with strings
+    # ICON_ALERT_CIRCLE, -> removed
+    # ICON_ALERT, -> removed
 )
 
 from esphome.components.nrf905 import nRF905Component
@@ -45,10 +46,10 @@ CONFIG_SCHEMA = fan.FAN_SCHEMA.extend(
 
         # Error sensors
         cv.Optional(CONF_ERROR_COUNT): sensor.sensor_schema(
-            icon=ICON_ALERT_CIRCLE,
+            icon="mdi:alert-circle",  # Using string directly instead of constant
         ),
         cv.Optional(CONF_ERROR_CODE): text_sensor.text_sensor_schema(
-            icon=ICON_ALERT,
+            icon="mdi:alert",  # Using string directly instead of constant
         ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
