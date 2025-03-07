@@ -16,7 +16,7 @@ namespace zehnder {
 #define FAN_TX_FRAMES 4         // Retransmit every transmitted frame 4 times
 #define FAN_TX_RETRIES 10       // Retry transmission 10 times if no reply is received
 #define FAN_TTL 250             // 0xFA, default time-to-live for a frame
-#define FAN_REPLY_TIMEOUT 2000  // Wait 2000ms for receiving a reply
+#define FAN_REPLY_TIMEOUT 1000  // Wait 2000ms for receiving a reply
 
 /* Fan device types */
 enum {
@@ -47,6 +47,17 @@ enum {
   FAN_TYPE_ERROR_STATUS_RESPONSE = 0x31, // Response with error codes
   FAN_TYPE_QUERY_FILTER_STATUS = 0x32,   // Request filter status
   FAN_TYPE_FILTER_STATUS_RESPONSE = 0x33 // Response with filter status
+};
+
+/* Fan error codes */
+enum {
+  ERROR_OVERHEATING = 0x01,            // DANGER! OVERHEATING!
+  ERROR_TEMP_SENSOR_P_ODA = 0x02,      // TEMP_SENSOR_P-ODA ERROR
+  ERROR_PREHEAT_LOCATION = 0x03,       // PREHEAT_LOCATION ERROR
+  ERROR_EXT_PRESSURE_EHA = 0x04,       // EXT_PRESSURE_EHA ERROR
+  ERROR_EXT_PRESSURE_SUP = 0x05,       // EXT_PRESSURE_SUP ERROR
+  ERROR_TEMPCONTROL_P_ODA = 0x06,      // TEMPCONTROL_P-ODA ERROR
+  ERROR_TEMPCONTROL_SUP = 0x07         // TEMPCONTROL_SUP ERROR
 };
 
 /* Fan speed presets */
