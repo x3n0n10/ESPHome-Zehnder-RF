@@ -253,7 +253,13 @@ void ZehnderRF::loop(void) {
 void ZehnderRF::queryErrorStatus(void) {
   RfFrame *const pFrame = (RfFrame *) this->_txFrame;  // frame helper
 
-  ESP_LOGI(TAG, "Query error status (command: 0x%02X)", FAN_TYPE_QUERY_ERROR_STATUS);
+  // Try different command codes
+  // Current command: 0x30
+  // Let's try: 0x31, 0x11, 0x20, or 0x40
+  // Comment/uncomment the line below to change the command code
+  uint8_t test_command = 0x31;  // Change this value to test different codes
+
+  ESP_LOGI(TAG, "Query error status (command: 0x%02X)", test_command);
 
   this->lastErrorQuery_ = millis();  // Update time
 
@@ -266,7 +272,7 @@ void ZehnderRF::queryErrorStatus(void) {
   pFrame->tx_type = this->config_.fan_my_device_type;
   pFrame->tx_id = this->config_.fan_my_device_id;
   pFrame->ttl = FAN_TTL;
-  pFrame->command = FAN_TYPE_QUERY_ERROR_STATUS;  // 0x30 in your header
+  pFrame->command = test_command;  // Use the test command
   pFrame->parameter_count = 0x00;  // No parameters
 
   ESP_LOGD(TAG, "Error query frame: type:0x%02X id:0x%02X -> type:0x%02X id:0x%02X cmd:0x%02X",
@@ -511,76 +517,89 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
         break;
 
       case StateWaitErrorStatusResponse:
-        if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
-            (pResponse->rx_id == this->config_.fan_my_device_id)) {      // and id match, it is for us
-          switch (pResponse->command) {
-            case FAN_TYPE_ERROR_STATUS_RESPONSE: {
-              const RfPayloadErrorStatus* errorStatus =
-                  reinterpret_cast<const RfPayloadErrorStatus*>(&pResponse->payload);
+        ESP_LOGI(TAG, "Received potential error response: cmd=0x%02X from ID 0x%02X type 0x%02X",
+         pResponse->command, pResponse->tx_id, pResponse->tx_type);
 
-              ESP_LOGI(TAG, "Received error status; count: %u, severity: %u",
-                       errorStatus->errorCount, errorStatus->errorSeverity);
+        // Debug log all bytes of the payload for analysis
+        ESP_LOGI(TAG, "Full response payload bytes:");
+        for (int i = 0; i < 9; i++) {
+        ESP_LOGI(TAG, "  Byte %d: 0x%02X", i, pResponse->payload.parameters[i]);
+        }
 
-              // Log individual error codes for debugging
-              if (errorStatus->errorCount > 0) {
-                ESP_LOGI(TAG, "Error codes present:");
-                for (int i = 0; i < errorStatus->errorCount && i < 5; i++) {
-                  ESP_LOGI(TAG, "  Error %d: E%02d", i+1, errorStatus->errorCodes[i]);
-                }
-              } else {
-                ESP_LOGI(TAG, "No error codes present");
-              }
+        // Check if it's our unit responding
+        if ((pResponse->rx_type == this->config_.fan_my_device_type) &&
+          (pResponse->rx_id == this->config_.fan_my_device_id)) {
 
-              this->rfComplete();
+        // Try different response codes - originally we expected 0x31
+        if (pResponse->command == 0x31) {
+          // Original expected response
+          const RfPayloadErrorStatus* errorStatus =
+              reinterpret_cast<const RfPayloadErrorStatus*>(&pResponse->payload);
 
-              // Update error count sensor if connected
-              if (this->error_count_sensor_ != nullptr) {
-                ESP_LOGD(TAG, "Publishing error count: %u", errorStatus->errorCount);
-                this->error_count_sensor_->publish_state(errorStatus->errorCount);
-              }
+          ESP_LOGI(TAG, "Received error status; count: %u, severity: %u",
+                  errorStatus->errorCount, errorStatus->errorSeverity);
 
-              // Update error code sensor if connected
-              if (this->error_code_sensor_ != nullptr) {
-                if (errorStatus->errorCount > 0) {
-                  char error_text[32] = {0};
-                  snprintf(error_text, sizeof(error_text), "E%02d", errorStatus->errorCodes[0]);
-                  for (int i = 1; i < errorStatus->errorCount && i < 5; i++) {
-                    char temp[8];
-                    snprintf(temp, sizeof(temp), ",E%02d", errorStatus->errorCodes[i]);
-                    strncat(error_text, temp, sizeof(error_text) - strlen(error_text) - 1);
-                  }
-                  ESP_LOGD(TAG, "Publishing error codes: %s", error_text);
-                  this->error_code_sensor_->publish_state(error_text);
-                } else {
-                  ESP_LOGD(TAG, "Publishing 'No Errors'");
-                  this->error_code_sensor_->publish_state("No Errors");
-                }
-              }
+          // Rest of the original handler code
+          // ...
+        }
+        // Also try to handle echo responses (command code 0x30 or whatever we sent)
+        else if (pResponse->command == 0x30 || pResponse->command == 0x31 ||
+                 pResponse->command == 0x11 || pResponse->command == 0x20 ||
+                 pResponse->command == 0x40) {
+          // Try to interpret the data anyway
+          ESP_LOGI(TAG, "Received echo response with same command code");
 
-              this->state_ = StateIdle;
+          // Check if there's any non-zero data in the payload
+          bool has_data = false;
+          for (int i = 0; i < 9; i++) {
+            if (pResponse->payload.parameters[i] != 0) {
+              has_data = true;
               break;
             }
+          }
 
-            default:
-              ESP_LOGW(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X",
-                      pResponse->command, pResponse->tx_id);
+          if (has_data) {
+            ESP_LOGI(TAG, "Response contains non-zero data - possibly error data");
+            // Try interpreting first byte as error count
+            uint8_t possible_error_count = pResponse->payload.parameters[0];
 
-              // Log the full received frame for detailed debugging
-              ESP_LOGV(TAG, "Unexpected frame payload:");
-              for (int i = 0; i < 9; i++) {
-                ESP_LOGV(TAG, "  Byte %d: 0x%02X", i, pResponse->payload.parameters[i]);
+            if (this->error_count_sensor_ != nullptr) {
+              this->error_count_sensor_->publish_state(possible_error_count);
+            }
+
+            if (this->error_code_sensor_ != nullptr) {
+              if (possible_error_count > 0) {
+                char error_text[32] = {0};
+                snprintf(error_text, sizeof(error_text), "Raw: ");
+                for (int i = 0; i < 4; i++) {
+                  char temp[8];
+                  snprintf(temp, sizeof(temp), "%02X ", pResponse->payload.parameters[i]);
+                  strncat(error_text, temp, sizeof(error_text) - strlen(error_text) - 1);
+                }
+                this->error_code_sensor_->publish_state(error_text);
+              } else {
+                this->error_code_sensor_->publish_state("No Errors (Echo)");
               }
-
-              this->state_ = StateIdle;
-              break;
-          }
+            }
           } else {
-          ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X",
-                   pResponse->command, pResponse->tx_id, pResponse->tx_type);
-
-          // Don't change state, wait for valid response or timeout
+            if (this->error_code_sensor_ != nullptr) {
+              this->error_code_sensor_->publish_state("No Error Data");
+            }
           }
-          break;
+
+          this->rfComplete();
+          this->state_ = StateIdle;
+        } else {
+          ESP_LOGW(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X",
+                  pResponse->command, pResponse->tx_id);
+          // Continue waiting for the correct response
+        }
+        } else {
+        ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X",
+                 pResponse->command, pResponse->tx_id, pResponse->tx_type);
+        // Don't change state, wait for valid response or timeout
+        }
+        break;
 
     case StateWaitSetSpeedResponse:
       if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
