@@ -509,27 +509,46 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
               const RfPayloadErrorStatus* errorStatus =
                   reinterpret_cast<const RfPayloadErrorStatus*>(&pResponse->payload);
 
-              ESP_LOGD(TAG, "Received error status; count: %u, severity: %u",
+              ESP_LOGI(TAG, "Received error status; count: %u, severity: %u",
                        errorStatus->errorCount, errorStatus->errorSeverity);
+
+              // Log individual error codes for debugging
+              if (errorStatus->errorCount > 0) {
+                ESP_LOGI(TAG, "Error codes present:");
+                for (int i = 0; i < errorStatus->errorCount && i < 5; i++) {
+                  ESP_LOGI(TAG, "  Error %d: E%02d", i+1, errorStatus->errorCodes[i]);
+                }
+              } else {
+                ESP_LOGI(TAG, "No error codes present");
+              }
 
               this->rfComplete();
 
-              // Update sensor values
-              if (this->error_count_sensor_ != nullptr) {
-                this->error_count_sensor_->publish_state(errorStatus->errorCount);
+              // Update sensor values if available
+              auto error_count_sensor = id(zehnder_comfofan_last_error_count);
+              auto error_code_sensor = id(zehnder_comfofan_last_error_code);
+
+              // Update the sensor with the current values
+              if (error_count_sensor != nullptr) {
+                ESP_LOGD(TAG, "Publishing error count: %u", errorStatus->errorCount);
+                error_count_sensor->publish_state(errorStatus->errorCount);
               }
 
-              if (this->error_code_sensor_ != nullptr && errorStatus->errorCount > 0) {
-                char error_text[32];
-                snprintf(error_text, sizeof(error_text), "E%02d", errorStatus->errorCodes[0]);
-                for (int i = 1; i < errorStatus->errorCount && i < 5; i++) {
-                  char temp[8];
-                  snprintf(temp, sizeof(temp), ",E%02d", errorStatus->errorCodes[i]);
-                  strncat(error_text, temp, sizeof(error_text) - strlen(error_text) - 1);
+              if (error_code_sensor != nullptr) {
+                if (errorStatus->errorCount > 0) {
+                  char error_text[32] = {0};
+                  snprintf(error_text, sizeof(error_text), "E%02d", errorStatus->errorCodes[0]);
+                  for (int i = 1; i < errorStatus->errorCount && i < 5; i++) {
+                    char temp[8];
+                    snprintf(temp, sizeof(temp), ",E%02d", errorStatus->errorCodes[i]);
+                    strncat(error_text, temp, sizeof(error_text) - strlen(error_text) - 1);
+                  }
+                  ESP_LOGD(TAG, "Publishing error codes: %s", error_text);
+                  error_code_sensor->publish_state(error_text);
+                } else {
+                  ESP_LOGD(TAG, "Publishing 'No Errors'");
+                  error_code_sensor->publish_state("No Errors");
                 }
-                this->error_code_sensor_->publish_state(error_text);
-              } else if (this->error_code_sensor_ != nullptr) {
-                this->error_code_sensor_->publish_state("No Errors");
               }
 
               this->state_ = StateIdle;
@@ -537,15 +556,25 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
             }
 
             default:
-              ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X",
-                       pResponse->command, pResponse->tx_id);
+              ESP_LOGW(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X",
+                      pResponse->command, pResponse->tx_id);
+
+              // Log the full received frame for detailed debugging
+              ESP_LOGV(TAG, "Unexpected frame payload:");
+              for (int i = 0; i < 9; i++) {
+                ESP_LOGV(TAG, "  Byte %d: 0x%02X", i, pResponse->payload.parameters[i]);
+              }
+
+              this->state_ = StateIdle;
               break;
           }
-        } else {
+          } else {
           ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X",
                    pResponse->command, pResponse->tx_id, pResponse->tx_type);
-        }
-        break;
+
+          // Don't change state, wait for valid response or timeout
+          }
+          break;
 
     case StateWaitSetSpeedResponse:
       if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
