@@ -253,7 +253,7 @@ void ZehnderRF::loop(void) {
 void ZehnderRF::queryErrorStatus(void) {
   RfFrame *const pFrame = (RfFrame *) this->_txFrame;  // frame helper
 
-  ESP_LOGD(TAG, "Query error status");
+  ESP_LOGI(TAG, "Query error status (command: 0x%02X)", FAN_TYPE_QUERY_ERROR_STATUS);
 
   this->lastErrorQuery_ = millis();  // Update time
 
@@ -266,11 +266,20 @@ void ZehnderRF::queryErrorStatus(void) {
   pFrame->tx_type = this->config_.fan_my_device_type;
   pFrame->tx_id = this->config_.fan_my_device_id;
   pFrame->ttl = FAN_TTL;
-  pFrame->command = FAN_TYPE_QUERY_ERROR_STATUS;
+  pFrame->command = FAN_TYPE_QUERY_ERROR_STATUS;  // 0x30 in your header
   pFrame->parameter_count = 0x00;  // No parameters
+
+  ESP_LOGD(TAG, "Error query frame: type:0x%02X id:0x%02X -> type:0x%02X id:0x%02X cmd:0x%02X",
+           pFrame->tx_type, pFrame->tx_id, pFrame->rx_type, pFrame->rx_id, pFrame->command);
 
   this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]() {
     ESP_LOGW(TAG, "Error status query timeout");
+
+    // Notify UI about failure via sensors if available
+    if (this->error_code_sensor_ != nullptr) {
+      this->error_code_sensor_->publish_state("Query Timeout");
+    }
+
     this->state_ = StateIdle;
   });
 
@@ -524,17 +533,14 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
 
               this->rfComplete();
 
-              // Update sensor values if available
-              auto error_count_sensor = id(zehnder_comfofan_last_error_count);
-              auto error_code_sensor = id(zehnder_comfofan_last_error_code);
-
-              // Update the sensor with the current values
-              if (error_count_sensor != nullptr) {
+              // Update error count sensor if connected
+              if (this->error_count_sensor_ != nullptr) {
                 ESP_LOGD(TAG, "Publishing error count: %u", errorStatus->errorCount);
-                error_count_sensor->publish_state(errorStatus->errorCount);
+                this->error_count_sensor_->publish_state(errorStatus->errorCount);
               }
 
-              if (error_code_sensor != nullptr) {
+              // Update error code sensor if connected
+              if (this->error_code_sensor_ != nullptr) {
                 if (errorStatus->errorCount > 0) {
                   char error_text[32] = {0};
                   snprintf(error_text, sizeof(error_text), "E%02d", errorStatus->errorCodes[0]);
@@ -544,10 +550,10 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
                     strncat(error_text, temp, sizeof(error_text) - strlen(error_text) - 1);
                   }
                   ESP_LOGD(TAG, "Publishing error codes: %s", error_text);
-                  error_code_sensor->publish_state(error_text);
+                  this->error_code_sensor_->publish_state(error_text);
                 } else {
                   ESP_LOGD(TAG, "Publishing 'No Errors'");
-                  error_code_sensor->publish_state("No Errors");
+                  this->error_code_sensor_->publish_state("No Errors");
                 }
               }
 
