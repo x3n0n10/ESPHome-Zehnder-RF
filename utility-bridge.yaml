@@ -14,10 +14,9 @@ esp32:
 
 # Enable logging
 logger:
-  level: DEBUG
 
 preferences:
-  flash_write_interval: 1d
+  flash_write_interval: 1h
 
 # Enable Home Assistant API
 api:
@@ -53,6 +52,17 @@ api:
             } else {
               ESP_LOGW("zehnder", "Unknown mode %s", mode);
             }
+    - service: reset_pairing
+      then:
+        - logger.log:
+            level: INFO
+            format: "Resetting pairing data"
+        - lambda: |-
+            ESP_LOGI("zehnder", "Forcing pairing reset");
+            global_preferences->reset();
+        - delay: 2s
+        - lambda: |-
+            ESP.restart();
 
 ota:
 - platform: esphome
@@ -67,16 +77,6 @@ wifi:
   ap:
     ssid: "${device_name} hotspot"
     password: !secret "zehnder_comfofan_ap_password"
-
-esp32_ble_tracker:
-  scan_parameters:
-    interval: 1100ms
-    window: 1100ms
-    active: true
-
-bluetooth_proxy:
-  active: true
-
 
 captive_portal:
 
@@ -118,32 +118,6 @@ sensor:
     accuracy_decimals: 0
     update_interval: 15s
     lambda: !lambda 'return ${device_id}_ventilation->voltage;'
-    
-  # Add filter sensors
-  - platform: template
-    name: "${device_name} Filter Remaining"
-    id: "${device_id}_filter_remaining"
-    unit_of_measurement: "%"
-    icon: mdi:air-filter
-    update_interval: 600s
-    entity_category: diagnostic
-    
-  - platform: template
-    name: "${device_name} Filter Runtime"
-    id: "${device_id}_filter_runtime"
-    unit_of_measurement: "h"
-    device_class: "duration"
-    icon: mdi:clock-outline
-    update_interval: 600s
-    entity_category: diagnostic
-    
-  # Add error count sensor  
-  - platform: template
-    name: "${device_name} Error Count"
-    id: "${device_id}_error_count"
-    icon: mdi:alert-circle
-    update_interval: 300s
-    entity_category: diagnostic
 
 text_sensor:
   - platform: wifi_info
@@ -172,20 +146,31 @@ text_sensor:
                      case 4: return std::string("Max");
                      default: return std::string("Auto");
                  }'
-    
-  # Add error code sensor
-  - platform: template
-    name: "${device_name} Error Code"
-    id: "${device_id}_error_code"
-    icon: mdi:alert
-    update_interval: 300s
-    entity_category: diagnostic
 
 switch:
   - platform: safe_mode
     name: "${device_name} Restart (Safe Mode)"
+
   - platform: restart
     name: "${device_name} Restart"
+    id: ${device_id}_restart
+
+  # Add a pairing reset switch
+  - platform: template
+    name: "${device_name} Reset Pairing"
+    id: "${device_id}_reset_pairing"
+    icon: mdi:restart-alert
+    optimistic: true
+    turn_on_action:
+      - logger.log: "Resetting pairing data"
+      - lambda: |-
+          ESP_LOGI("zehnder", "Forcing pairing reset");
+          global_preferences->reset();
+      - delay: 1s
+      - switch.turn_off: "${device_id}_reset_pairing"
+      - delay: 2s
+      - lambda: |-
+          ESP.restart();
 
 button:
   - platform: template
@@ -246,11 +231,10 @@ button:
             ${device_id}_ventilation->setSpeed(4, 60);
 
 # Load external components
-# https://esphome.io/components/external_components.html#external-components-git
 external_components:
   - source: github://bramboe/ESPHome-Zehnder-RF
     components: [ nrf905, zehnder ]
-    refresh: 0s
+    refresh: 0s  # Disable auto refresh to ensure version stability
 
 # SPI
 spi:
@@ -258,7 +242,7 @@ spi:
   mosi_pin: GPIO13
   miso_pin: GPIO12
 
-# nRF905 config
+# nRF905 config with more robust initialization
 nrf905:
   id: "nrf905_rf"
   cs_pin: GPIO15
@@ -269,25 +253,13 @@ nrf905:
   # am_pin: GPIO32
   # dr_pin: GPIO35
 
-# Ensure nrf905 is fully initialized with a short delay
+# Ensure nrf905 is fully initialized with a longer delay
 interval:
-  - interval: 5s
+  - interval: 15s
     then:
-      - lambda: |-
-            ESP_LOGI("main", "nRF905 initialized, proceeding with Zehnder setup");
-            
-  # Add periodic update interval for diagnostic sensors
-  - interval: 600s
-    then:
-      - lambda: |-
-            // This is a placeholder for when the filter status would be queried
-            // Your component will handle this internally with our code modifications
-            
-  - interval: 300s
-    then:
-      - lambda: |-
-            // This is a placeholder for when the error status would be queried
-            // Your component will handle this internally with our code modifications
+      - logger.log:
+          level: INFO
+          format: "nRF905 initialization check"
 
 # The FAN controller
 fan:
