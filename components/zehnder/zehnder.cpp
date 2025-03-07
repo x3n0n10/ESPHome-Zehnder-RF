@@ -295,7 +295,11 @@ void ZehnderRF::queryErrorStatus(void) {
 void ZehnderRF::queryFilterStatus(void) {
   RfFrame *const pFrame = (RfFrame *) this->_txFrame;  // frame helper
 
-  ESP_LOGD(TAG, "Query filter status");
+  ESP_LOGI(TAG, "Attempting to query filter status");
+  ESP_LOGI(TAG, "  Sender Type: 0x%02X", this->config_.fan_my_device_type);
+  ESP_LOGI(TAG, "  Sender ID: 0x%02X", this->config_.fan_my_device_id);
+  ESP_LOGI(TAG, "  Receiver Type: 0x%02X", this->config_.fan_main_unit_type);
+  ESP_LOGI(TAG, "  Receiver ID: 0x%02X", this->config_.fan_main_unit_id);
 
   this->lastFilterQuery_ = millis();  // Update time
 
@@ -311,8 +315,11 @@ void ZehnderRF::queryFilterStatus(void) {
   pFrame->command = FAN_TYPE_QUERY_FILTER_STATUS;
   pFrame->parameter_count = 0x00;  // No parameters
 
+  ESP_LOGI(TAG, "  Sending Filter Query Command: 0x%02X", pFrame->command);
+
   this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]() {
-    ESP_LOGW(TAG, "Filter status query timeout");
+    ESP_LOGW(TAG, "Filter status query TIMEOUT");
+    ESP_LOGW(TAG, "  No response received within retry limit");
     this->state_ = StateIdle;
   });
 
@@ -458,11 +465,48 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       }
       break;
 
+    case StateWaitFilterStatusResponse:
+      if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
+          (pResponse->rx_id == this->config_.fan_my_device_id)) {      // and id match, it is for us
+        switch (pResponse->command) {
+          case FAN_TYPE_FILTER_STATUS_RESPONSE: {
+            const RfPayloadFilterStatus* filterStatus =
+                reinterpret_cast<const RfPayloadFilterStatus*>(&pResponse->payload);
+
+            ESP_LOGD(TAG, "Received filter status; total hours: %u, filter hours: %u, remaining: %u%%",
+                     filterStatus->totalRunHours, filterStatus->filterRunHours,
+                     filterStatus->filterPercentRemaining);
+
+            this->rfComplete();
+
+            // Update sensor values if you've added them
+            if (this->filter_remaining_sensor_ != nullptr) {
+              this->filter_remaining_sensor_->publish_state(filterStatus->filterPercentRemaining);
+            }
+            if (this->filter_runtime_sensor_ != nullptr) {
+              this->filter_runtime_sensor_->publish_state(filterStatus->filterRunHours);
+            }
+
+            this->state_ = StateIdle;
+            break;
+          }
+
+          default:
+            ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X",
+                     pResponse->command, pResponse->tx_id);
+            break;
+        }
+      } else {
+        ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X",
+                 pResponse->command, pResponse->tx_id, pResponse->tx_type);
+      }
+      break;
+
     default:
       ESP_LOGD(TAG, "Received frame from unknown device in unknown state; type 0x%02X from ID 0x%02X type 0x%02X",
                pResponse->command, pResponse->tx_id, pResponse->tx_type);
       break;
-  }
+}
 }
 
 static uint8_t minmax(const uint8_t value, const uint8_t min, const uint8_t max) {
