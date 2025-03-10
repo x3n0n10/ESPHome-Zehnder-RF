@@ -433,6 +433,37 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       }
       break;
 
+    case StateIdle:
+      if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
+            (pResponse->rx_id == this->config_.fan_my_device_id)) {      // and id match, it is for us
+          switch (pResponse->command) {
+            case FAN_TYPE_FAN_SETTINGS:
+              ESP_LOGD(TAG, "Received fan settings; speed: 0x%02X voltage: %i timer: %i",
+                      pResponse->payload.fanSettings.speed, pResponse->payload.fanSettings.voltage,
+                      pResponse->payload.fanSettings.timer);
+
+              this->rfComplete();
+
+              this->state = pResponse->payload.fanSettings.speed > 0;
+              this->speed = pResponse->payload.fanSettings.speed;
+              this->timer = pResponse->payload.fanSettings.timer;
+              this->voltage = pResponse->payload.fanSettings.voltage;
+              this->publish_state();
+
+              this->state_ = StateIdle;
+              break;
+
+            default:
+              ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X", pResponse->command,
+                      pResponse->tx_id);
+              break;
+          }
+        } else {
+          ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X", pResponse->command,
+                  pResponse->tx_id, pResponse->tx_type);
+        }
+        break;
+
     case StateWaitQueryResponse:
       if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
           (pResponse->rx_id == this->config_.fan_my_device_id)) {      // and id match, it is for us
