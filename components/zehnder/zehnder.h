@@ -82,7 +82,7 @@ class ZehnderRF : public Component, public fan::Fan {
   void set_error_code_sensor(text_sensor::TextSensor *sensor) { error_code_sensor_ = sensor; }
 
   void dump_config() override;
-  void set_config() override;
+  void set_config(const uint32_t, const uint8_t, const uint8_t, const uint8_t, const uint8_t) override;
 
   fan::FanTraits get_traits() override;
   int get_speed_count() { return this->speed_count_; }
