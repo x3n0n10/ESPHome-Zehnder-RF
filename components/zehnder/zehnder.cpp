@@ -197,6 +197,20 @@ namespace esphome
       }
     }
 
+    void ZehnderRF::set_config(const uint32_t fan_networkId,
+                               const uint8_t  fan_my_device_type,
+                               const uint8_t  fan_my_device_id,
+                               const uint8_t  fan_main_unit_type,
+                               const uint8_t  fan_main_unit_id) {
+      this->config_.fan_networkId      = fan_networkId;      // Fan (Zehnder/BUVA) network ID
+      this->config_.fan_my_device_type = fan_my_device_type; // Fan (Zehnder/BUVA) device type
+      this->config_.fan_my_device_id   = fan_my_device_id;   // Fan (Zehnder/BUVA) device ID
+      this->config_.fan_main_unit_type = fan_main_unit_type; // Fan (Zehnder/BUVA) main unit type
+      this->config_.fan_main_unit_id   = fan_main_unit_id;   // Fan (Zehnder/BUVA) main unit ID
+      ESP_LOGD(TAG, "Saving pairing config");
+      this->pref_.save(&this->config_);
+    }
+
     void ZehnderRF::loop(void)
     {
       uint8_t deviceId;
