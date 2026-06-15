@@ -18,6 +18,11 @@ namespace zehnder {
 #define FAN_TTL 250             // 0xFA, default time-to-live for a frame
 #define FAN_REPLY_TIMEOUT 2000  // Wait 2000ms for receiving a reply
 
+// Safety timeouts so the state machine can never permanently wedge (which would
+// otherwise require a manual reboot of the ESP).
+#define FAN_TX_TIMEOUT 2000           // Max time to wait for a TxReady before resetting the radio
+#define FAN_STATE_WATCHDOG_TIMEOUT 60000  // Force recovery if stuck out of idle this long
+
 /* Fan device types */
 enum {
   FAN_TYPE_BROADCAST = 0x00,       // Broadcast to all devices
@@ -166,6 +171,8 @@ class ZehnderRF : public Component, public fan::Fan {
 
   uint32_t msgSendTime_{0};
   uint32_t airwayFreeWaitTime_{0};
+  uint32_t txStartTime_{0};        // Time the radio entered TxBusy (for TX timeout)
+  uint32_t lastStateIdleTime_{0};  // Last time the main state machine was idle (for watchdog)
   int8_t retries_{-1};
 
   uint8_t newSpeed{0};
