@@ -171,6 +171,7 @@ namespace esphome
     void ZehnderRF::dump_config(void)
     {
       ESP_LOGCONFIG(TAG, "Zehnder Fan config:");
+      ESP_LOGCONFIG(TAG, "  Component version  %s", ZEHNDER_RF_VERSION);
       ESP_LOGCONFIG(TAG, "  Polling interval   %u", this->interval_);
       ESP_LOGCONFIG(TAG, "  Fan networkId      0x%08X", this->config_.fan_networkId);
       ESP_LOGCONFIG(TAG, "  Fan my device type 0x%02X", this->config_.fan_my_device_type);
