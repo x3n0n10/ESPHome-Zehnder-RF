@@ -956,11 +956,9 @@ namespace esphome
             --this->retries_;
             ESP_LOGD(TAG, "No data received, retry again (left: %u)", this->retries_);
 
-            // Add a short delay between retries
-            delay(150);
-
-            this->rfState_ = RfStateWaitAirwayFree;
-            this->airwayFreeWaitTime_ = millis();
+            // Non-blocking pause between retries (handled in RfStateRetryWait)
+            this->retryWaitTime_ = millis();
+            this->rfState_ = RfStateRetryWait;
           }
           else if (this->retries_ == 0)
           {
@@ -972,12 +970,18 @@ namespace esphome
               this->onReceiveTimeout_();
             }
 
-            // Add a longer delay before moving to idle
-            delay(250);
-
             // Back to idle
             this->rfState_ = RfStateIdle;
           }
+        }
+        break;
+
+      case RfStateRetryWait:
+        // Wait (without blocking the main loop) before re-attempting transmit
+        if ((millis() - this->retryWaitTime_) > FAN_RETRY_DELAY)
+        {
+          this->rfState_ = RfStateWaitAirwayFree;
+          this->airwayFreeWaitTime_ = millis();
         }
         break;
 
