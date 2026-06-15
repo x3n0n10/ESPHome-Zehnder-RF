@@ -17,6 +17,7 @@ namespace zehnder {
 #define FAN_TX_RETRIES 10       // Retry transmission 10 times if no reply is received
 #define FAN_TTL 250             // 0xFA, default time-to-live for a frame
 #define FAN_REPLY_TIMEOUT 2000  // Wait 2000ms for receiving a reply
+#define FAN_RETRY_DELAY 150     // Non-blocking pause between transmit retries
 
 // Safety timeouts so the state machine can never permanently wedge (which would
 // otherwise require a manual reboot of the ESP).
@@ -173,6 +174,7 @@ class ZehnderRF : public Component, public fan::Fan {
   uint32_t airwayFreeWaitTime_{0};
   uint32_t txStartTime_{0};        // Time the radio entered TxBusy (for TX timeout)
   uint32_t lastStateIdleTime_{0};  // Last time the main state machine was idle (for watchdog)
+  uint32_t retryWaitTime_{0};  // Start of the non-blocking pause between retries
   int8_t retries_{-1};
 
   uint8_t newSpeed{0};
@@ -184,6 +186,7 @@ class ZehnderRF : public Component, public fan::Fan {
     RfStateWaitAirwayFree,  // wait for airway free
     RfStateTxBusy,          //
     RfStateRxWait,
+    RfStateRetryWait,       // Non-blocking pause before retrying a transmit
   } RfState;
   RfState rfState_{RfStateIdle};
 };
