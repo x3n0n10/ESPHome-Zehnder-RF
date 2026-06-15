@@ -25,8 +25,19 @@ namespace zehnder {
 
 // Safety timeouts so the state machine can never permanently wedge (which would
 // otherwise require a manual reboot of the ESP).
-#define FAN_TX_TIMEOUT 2000           // Max time to wait for a TxReady before resetting the radio
+#define FAN_TX_TIMEOUT 2000               // Max time to wait for a TxReady before resetting the radio
 #define FAN_STATE_WATCHDOG_TIMEOUT 60000  // Force recovery if stuck out of idle this long
+
+// nRF905 RF settings used to talk to the Zehnder/BUVA fan network.
+#define FAN_RF_CHANNEL 118          // nRF905 channel
+#define FAN_RF_TX_POWER 10          // nRF905 TX power in dBm
+#define FAN_DEFAULT_RF_ADDRESS 0x89816EA9  // Address used before a network is paired
+
+// Timing of the main loop's periodic work.
+#define FAN_STARTUP_DELAY_MS 15000          // Wait after boot before talking to the fan
+#define FAN_AIRWAY_TIMEOUT_MS 5000          // Give up if the airway never goes free
+#define FAN_FILTER_QUERY_INTERVAL_MS 600000  // Poll filter status every 10 minutes
+#define FAN_ERROR_QUERY_INTERVAL_MS 300000   // Poll error status every 5 minutes
 
 /* Fan device types */
 enum {
@@ -74,6 +85,71 @@ enum {
 
 typedef enum { ResultOk, ResultBusy, ResultFailure } Result;
 
+/* ------------------------------------------------------------------------- *
+ *  Over-the-air protocol frame structures
+ *
+ *  Every frame is FAN_FRAMESIZE (16) bytes: a 7-byte header followed by a
+ *  9-byte payload whose meaning depends on the command field.
+ * ------------------------------------------------------------------------- */
+typedef struct __attribute__((packed)) {
+  uint32_t networkId;
+} RfPayloadNetworkJoinOpen;
+
+typedef struct __attribute__((packed)) {
+  uint32_t networkId;
+} RfPayloadNetworkJoinRequest;
+
+typedef struct __attribute__((packed)) {
+  uint32_t networkId;
+} RfPayloadNetworkJoinAck;
+
+typedef struct __attribute__((packed)) {
+  uint8_t speed;
+  uint8_t voltage;
+  uint8_t timer;
+} RfPayloadFanSettings;
+
+typedef struct __attribute__((packed)) {
+  uint8_t speed;
+} RfPayloadFanSetSpeed;
+
+typedef struct __attribute__((packed)) {
+  uint8_t speed;
+  uint8_t timer;
+} RfPayloadFanSetTimer;
+
+typedef struct __attribute__((packed)) {
+  uint8_t errorCount;     // Number of active errors
+  uint8_t errorCodes[5];  // Array of error codes
+  uint8_t errorSeverity;  // Severity level (warning/critical)
+} RfPayloadErrorStatus;
+
+typedef struct __attribute__((packed)) {
+  uint16_t totalRunHours;          // Total operation hours
+  uint16_t filterRunHours;         // Hours since last filter change
+  uint8_t filterPercentRemaining;  // Filter life remaining percentage
+} RfPayloadFilterStatus;
+
+typedef struct __attribute__((packed)) {
+  uint8_t rx_type;          // 0x00 RX Type
+  uint8_t rx_id;            // 0x01 RX ID
+  uint8_t tx_type;          // 0x02 TX Type
+  uint8_t tx_id;            // 0x03 TX ID
+  uint8_t ttl;              // 0x04 Time-To-Live
+  uint8_t command;          // 0x05 Frame type
+  uint8_t parameter_count;  // 0x06 Number of parameters
+
+  union {
+    uint8_t parameters[9];                          // 0x07 - 0x0F Depends on command
+    RfPayloadFanSetSpeed setSpeed;                  // Command 0x02
+    RfPayloadFanSetTimer setTimer;                  // Command 0x03
+    RfPayloadNetworkJoinRequest networkJoinRequest; // Command 0x04
+    RfPayloadNetworkJoinOpen networkJoinOpen;       // Command 0x06
+    RfPayloadFanSettings fanSettings;               // Command 0x07
+    RfPayloadNetworkJoinAck networkJoinAck;         // Command 0x0C
+  } payload;
+} RfFrame;
+
 class ZehnderRF : public Component, public fan::Fan {
  public:
   ZehnderRF();
@@ -113,6 +189,9 @@ class ZehnderRF : public Component, public fan::Fan {
 
   void setSpeed(const uint8_t speed, const uint8_t timer = 0);
 
+  // NOTE: `timer` and `voltage` are read directly from the YAML lambdas, so do
+  // not rename them. `timer` is a flag meaning "a countdown is currently active";
+  // `voltage` is the fan's reported output percentage.
   bool timer;
   int voltage;
 
@@ -129,6 +208,21 @@ class ZehnderRF : public Component, public fan::Fan {
   void rfComplete(void);
   void rfHandler(void);
   void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
+
+  // Returns true if a received frame is addressed to this device.
+  bool addressedToUs(const RfFrame *const pResponse) const;
+  // Applies a fan-settings frame to our published state (speed/timer/voltage).
+  void handleFanSettings(const RfFrame *const pResponse);
+
+  // Per-state receive handlers, dispatched from rfHandleReceived() based on the
+  // current protocol state. Keeping one handler per state keeps each readable.
+  void rfHandleLinkRequest(const RfFrame *const pResponse);
+  void rfHandleJoinResponse(const RfFrame *const pResponse);
+  void rfHandleJoinComplete(const RfFrame *const pResponse);
+  void rfHandleFanSettingsResponse(const RfFrame *const pResponse);
+  void rfHandleFilterStatusResponse(const RfFrame *const pResponse);
+  void rfHandleErrorStatusResponse(const RfFrame *const pResponse);
+  void rfHandleSetSpeedResponse(const RfFrame *const pResponse);
 
   typedef enum {
     StateStartup,
@@ -148,7 +242,9 @@ class ZehnderRF : public Component, public fan::Fan {
 
     StateNrOf  // Keep last
   } State;
-  State state_{StateStartup};
+  // Protocol state machine. NOTE: distinct from the inherited fan::Fan member
+  // `state` (the on/off flag) -- this drives the RF conversation with the fan.
+  State fsmState_{StateStartup};
   int speed_count_{};
 
   nrf905::nRF905 *rf_;
@@ -182,7 +278,7 @@ class ZehnderRF : public Component, public fan::Fan {
   uint32_t airwayFreeWaitTime_{0};
   uint32_t txStartTime_{0};        // Time the radio entered TxBusy (for TX timeout)
   uint32_t lastStateIdleTime_{0};  // Last time the main state machine was idle (for watchdog)
-  uint32_t retryWaitTime_{0};  // Start of the non-blocking pause between retries
+  uint32_t retryWaitTime_{0};      // Start of the non-blocking pause between retries
   int8_t retries_{-1};
 
   uint8_t newSpeed{0};
@@ -198,19 +294,6 @@ class ZehnderRF : public Component, public fan::Fan {
   } RfState;
   RfState rfState_{RfStateIdle};
 };
-
-// New payload structures
-typedef struct __attribute__((packed)) {
-  uint8_t errorCount;      // Number of active errors
-  uint8_t errorCodes[5];   // Array of error codes
-  uint8_t errorSeverity;   // Severity level (warning/critical)
-} RfPayloadErrorStatus;
-
-typedef struct __attribute__((packed)) {
-  uint16_t totalRunHours;       // Total operation hours
-  uint16_t filterRunHours;      // Hours since last filter change
-  uint8_t filterPercentRemaining; // Filter life remaining percentage
-} RfPayloadFilterStatus;
 
 }  // namespace zehnder
 }  // namespace esphome

@@ -11,60 +11,10 @@ namespace esphome
 
     static const char *const TAG = "zehnder";
 
-    typedef struct __attribute__((packed))
-    {
-      uint32_t networkId;
-    } RfPayloadNetworkJoinOpen;
-
-    typedef struct __attribute__((packed))
-    {
-      uint32_t networkId;
-    } RfPayloadNetworkJoinRequest;
-
-    typedef struct __attribute__((packed))
-    {
-      uint32_t networkId;
-    } RfPayloadNetworkJoinAck;
-
-    typedef struct __attribute__((packed))
-    {
-      uint8_t speed;
-      uint8_t voltage;
-      uint8_t timer;
-    } RfPayloadFanSettings;
-
-    typedef struct __attribute__((packed))
-    {
-      uint8_t speed;
-    } RfPayloadFanSetSpeed;
-
-    typedef struct __attribute__((packed))
-    {
-      uint8_t speed;
-      uint8_t timer;
-    } RfPayloadFanSetTimer;
-
-    typedef struct __attribute__((packed))
-    {
-      uint8_t rx_type;         // 0x00 RX Type
-      uint8_t rx_id;           // 0x01 RX ID
-      uint8_t tx_type;         // 0x02 TX Type
-      uint8_t tx_id;           // 0x03 TX ID
-      uint8_t ttl;             // 0x04 Time-To-Live
-      uint8_t command;         // 0x05 Frame type
-      uint8_t parameter_count; // 0x06 Number of parameters
-
-      union
-      {
-        uint8_t parameters[9];                          // 0x07 - 0x0F Depends on command
-        RfPayloadFanSetSpeed setSpeed;                  // Command 0x02
-        RfPayloadFanSetTimer setTimer;                  // Command 0x03
-        RfPayloadNetworkJoinRequest networkJoinRequest; // Command 0x04
-        RfPayloadNetworkJoinOpen networkJoinOpen;       // Command 0x06
-        RfPayloadFanSettings fanSettings;               // Command 0x07
-        RfPayloadNetworkJoinAck networkJoinAck;         // Command 0x0C
-      } payload;
-    } RfFrame;
+    // Fixed acknowledgement payload captured from a genuine remote, echoed back to
+    // the main unit after it reports new fan settings. The exact meaning of these
+    // bytes is unknown, but a real remote sends them verbatim.
+    static const uint8_t FAN_SETTINGS_ACK_PAYLOAD[3] = {0x54, 0x03, 0x20};
 
     ZehnderRF::ZehnderRF(void) {}
 
@@ -83,7 +33,7 @@ namespace esphome
         ESP_LOGD(TAG, "Control has speed: %u", this->speed);
       }
 
-      switch (this->state_)
+      switch (this->fsmState_)
       {
       case StateIdle:
         // Set speed
@@ -118,19 +68,19 @@ namespace esphome
       rfConfig = this->rf_->getConfig();
 
       rfConfig.band = true;
-      rfConfig.channel = 118;
+      rfConfig.channel = FAN_RF_CHANNEL;
 
-      // // CRC 16
+      // CRC 16
       rfConfig.crc_enable = true;
       rfConfig.crc_bits = 16;
 
-      // // TX power 10
-      rfConfig.tx_power = 10;
+      // TX power
+      rfConfig.tx_power = FAN_RF_TX_POWER;
 
-      // // RX power normal
+      // RX power normal
       rfConfig.rx_power = nrf905::PowerNormal;
 
-      rfConfig.rx_address = 0x89816EA9; // ZEHNDER_NETWORK_LINK_ID;
+      rfConfig.rx_address = FAN_DEFAULT_RF_ADDRESS;
       rfConfig.rx_address_width = 4;
       rfConfig.rx_payload_width = 16;
 
@@ -143,7 +93,7 @@ namespace esphome
 
       // Write config back
       this->rf_->updateConfig(&rfConfig);
-      this->rf_->writeTxAddress(0x89816EA9);
+      this->rf_->writeTxAddress(FAN_DEFAULT_RF_ADDRESS);
 
       this->speed_count_ = 4;
 
@@ -226,29 +176,29 @@ namespace esphome
       // (other than startup/pairing, which legitimately wait for the user), force
       // a recovery back to idle. This guarantees the component self-heals instead
       // of needing a manual reboot.
-      if (this->state_ == StateIdle)
+      if (this->fsmState_ == StateIdle)
       {
         this->lastStateIdleTime_ = millis();
       }
-      else if ((this->state_ != StateStartup) && (this->state_ != StateStartDiscovery) &&
-               (this->state_ != StateDiscoveryWaitForLinkRequest) &&
-               (this->state_ != StateDiscoveryWaitForJoinResponse) &&
-               (this->state_ != StateDiscoveryJoinComplete))
+      else if ((this->fsmState_ != StateStartup) && (this->fsmState_ != StateStartDiscovery) &&
+               (this->fsmState_ != StateDiscoveryWaitForLinkRequest) &&
+               (this->fsmState_ != StateDiscoveryWaitForJoinResponse) &&
+               (this->fsmState_ != StateDiscoveryJoinComplete))
       {
         if ((millis() - this->lastStateIdleTime_) > FAN_STATE_WATCHDOG_TIMEOUT)
         {
-          ESP_LOGW(TAG, "State machine stuck in state 0x%02X, forcing recovery", this->state_);
+          ESP_LOGW(TAG, "State machine stuck in state 0x%02X, forcing recovery", this->fsmState_);
           this->rfComplete();
-          this->state_ = StateIdle;
+          this->fsmState_ = StateIdle;
           this->lastStateIdleTime_ = millis();
         }
       }
 
-      switch (this->state_)
+      switch (this->fsmState_)
       {
       case StateStartup:
         // Wait until started up
-        if (millis() > 15000)
+        if (millis() > FAN_STARTUP_DELAY_MS)
         {
           // Discovery?
           if ((this->config_.fan_networkId == 0x00000000) || (this->config_.fan_my_device_type == 0) ||
@@ -257,7 +207,7 @@ namespace esphome
           {
             ESP_LOGD(TAG, "Invalid config, start paring");
 
-            this->state_ = StateStartDiscovery;
+            this->fsmState_ = StateStartDiscovery;
           }
           else
           {
@@ -285,7 +235,7 @@ namespace esphome
         if (this->rfState_ == RfStateIdle)
         {
           // When done, return to idle
-          this->state_ = StateIdle;
+          this->fsmState_ = StateIdle;
         }
         break;
 
@@ -303,14 +253,14 @@ namespace esphome
           }
 
           // Add filter query every 10 minutes if sensors are connected
-          if (((millis() - this->lastFilterQuery_) > 600000) &&
+          if (((millis() - this->lastFilterQuery_) > FAN_FILTER_QUERY_INTERVAL_MS) &&
               (this->filter_remaining_sensor_ != nullptr || this->filter_runtime_sensor_ != nullptr))
           {
             this->queryFilterStatus();
           }
 
           // Add error query every 5 minutes if sensors are connected
-          if (((millis() - this->lastErrorQuery_) > 300000) &&
+          if (((millis() - this->lastErrorQuery_) > FAN_ERROR_QUERY_INTERVAL_MS) &&
               (this->error_count_sensor_ != nullptr || this->error_code_sensor_ != nullptr))
           {
             this->queryErrorStatus();
@@ -346,9 +296,9 @@ namespace esphome
       this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
                           {
     ESP_LOGW(TAG, "Error status query timeout");
-    this->state_ = StateIdle; });
+    this->fsmState_ = StateIdle; });
 
-      this->state_ = StateWaitErrorStatusResponse;
+      this->fsmState_ = StateWaitErrorStatusResponse;
     }
 
     void ZehnderRF::queryFilterStatus(void)
@@ -374,386 +324,383 @@ namespace esphome
       this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
                           {
     ESP_LOGW(TAG, "Filter status query timeout");
-    this->state_ = StateIdle; });
+    this->fsmState_ = StateIdle; });
 
-      this->state_ = StateWaitFilterStatusResponse;
+      this->fsmState_ = StateWaitFilterStatusResponse;
     }
 
+    // Dispatches a received frame to the handler for the current protocol state.
     void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength)
     {
-      const RfFrame *const pResponse = (RfFrame *)pData;
-      RfFrame *const pTxFrame = (RfFrame *)this->_txFrame; // frame helper
-      nrf905::Config rfConfig;
+      const RfFrame *const pResponse = (const RfFrame *)pData;
 
-      ESP_LOGD(TAG, "Current state: 0x%02X", this->state_);
-      switch (this->state_)
+      ESP_LOGD(TAG, "Current state: 0x%02X", this->fsmState_);
+      switch (this->fsmState_)
       {
       case StateDiscoveryWaitForLinkRequest:
-        ESP_LOGD(TAG, "DiscoverStateWaitForLinkRequest");
-        switch (pResponse->command)
-        {
-        case FAN_NETWORK_JOIN_OPEN: // Received linking request from main unit
-          ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X (%s) with ID 0x%02X on network 0x%08X", pResponse->tx_type,
-                   pResponse->tx_type == FAN_TYPE_MAIN_UNIT ? "Main" : "?", pResponse->tx_id,
-                   pResponse->payload.networkJoinOpen.networkId);
-
-          this->rfComplete();
-
-          (void)memset(this->_txFrame, 0, FAN_FRAMESIZE); // Clear frame data
-
-          // Found a main unit, so send a join request
-          pTxFrame->rx_type = FAN_TYPE_MAIN_UNIT; // Set type to main unit
-          pTxFrame->rx_id = pResponse->tx_id;     // Set ID to the ID of the main unit
-          pTxFrame->tx_type = this->config_.fan_my_device_type;
-          pTxFrame->tx_id = this->config_.fan_my_device_id;
-          pTxFrame->ttl = FAN_TTL;
-          pTxFrame->command = FAN_NETWORK_JOIN_REQUEST; // Request to connect to network
-          pTxFrame->parameter_count = sizeof(RfPayloadNetworkJoinOpen);
-          // Request to connect to the received network ID
-          pTxFrame->payload.networkJoinRequest.networkId = pResponse->payload.networkJoinOpen.networkId;
-
-          // Store for later
-          this->config_.fan_networkId = pResponse->payload.networkJoinOpen.networkId;
-          this->config_.fan_main_unit_type = pResponse->tx_type;
-          this->config_.fan_main_unit_id = pResponse->tx_id;
-
-          // Update address
-          rfConfig = this->rf_->getConfig();
-          rfConfig.rx_address = pResponse->payload.networkJoinOpen.networkId;
-          this->rf_->updateConfig(&rfConfig, NULL);
-          this->rf_->writeTxAddress(pResponse->payload.networkJoinOpen.networkId, NULL);
-
-          // Send response frame
-          this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
-                              {
-            ESP_LOGW(TAG, "Query Timeout");
-            this->state_ = StateStartDiscovery; });
-
-          this->state_ = StateDiscoveryWaitForJoinResponse;
-          break;
-
-        default:
-          ESP_LOGD(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X", pResponse->command,
-                   pResponse->tx_id);
-          break;
-        }
+        this->rfHandleLinkRequest(pResponse);
         break;
 
       case StateDiscoveryWaitForJoinResponse:
-        ESP_LOGD(TAG, "DiscoverStateWaitForJoinResponse");
-        switch (pResponse->command)
-        {
-        case FAN_FRAME_0B:
-          if ((pResponse->rx_type == this->config_.fan_my_device_type) &&
-              (pResponse->rx_id == this->config_.fan_my_device_id) &&
-              (pResponse->tx_type == this->config_.fan_main_unit_type) &&
-              (pResponse->tx_id == this->config_.fan_main_unit_id))
-          {
-            ESP_LOGD(TAG, "Discovery: Link successful to unit with ID 0x%02X on network 0x%08X", pResponse->tx_id,
-                     this->config_.fan_networkId);
-
-            this->rfComplete();
-
-            (void)memset(this->_txFrame, 0, FAN_FRAMESIZE); // Clear frame data
-
-            pTxFrame->rx_type = FAN_TYPE_MAIN_UNIT; // Set type to main unit
-            pTxFrame->rx_id = pResponse->tx_id;     // Set ID to the ID of the main unit
-            pTxFrame->tx_type = this->config_.fan_my_device_type;
-            pTxFrame->tx_id = this->config_.fan_my_device_id;
-            pTxFrame->ttl = FAN_TTL;
-            pTxFrame->command = FAN_FRAME_0B; // 0x0B acknowledge link successful
-            pTxFrame->parameter_count = 0x00; // No parameters
-
-            // Send response frame
-            this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
-                                {
-              ESP_LOGW(TAG, "Query Timeout");
-              this->state_ = StateStartDiscovery; });
-
-            this->state_ = StateDiscoveryJoinComplete;
-          }
-          else
-          {
-            ESP_LOGE(TAG, "Discovery: Received unknown link success from ID 0x%02X on network 0x%08X", pResponse->tx_id,
-                     this->config_.fan_networkId);
-          }
-          break;
-
-        default:
-          ESP_LOGE(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X", pResponse->command,
-                   pResponse->tx_id);
-          break;
-        }
+        this->rfHandleJoinResponse(pResponse);
         break;
 
       case StateDiscoveryJoinComplete:
-        ESP_LOGD(TAG, "StateDiscoveryJoinComplete");
-        switch (pResponse->command)
-        {
-        case FAN_TYPE_QUERY_NETWORK:
-          if ((pResponse->rx_type == this->config_.fan_main_unit_type) &&
-              (pResponse->rx_id == this->config_.fan_main_unit_id) &&
-              (pResponse->tx_type == this->config_.fan_main_unit_type) &&
-              (pResponse->tx_id == this->config_.fan_main_unit_id))
-          {
-            ESP_LOGD(TAG, "Discovery: received network join success 0x0D");
-
-            this->rfComplete();
-
-            ESP_LOGD(TAG, "Saving pairing config");
-            this->pref_.save(&this->config_);
-            // Force the pairing data to flash immediately. Otherwise it only gets
-            // written on the (long) flash_write_interval, so a power cycle before
-            // then loses the pairing and forces the user to pair again.
-            global_preferences->sync();
-
-            this->state_ = StateIdle;
-          }
-          else
-          {
-            ESP_LOGW(TAG, "Unexpected frame join reponse from Type 0x%02X ID 0x%02X", pResponse->tx_type,
-                     pResponse->tx_id);
-          }
-          break;
-
-        default:
-          ESP_LOGE(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X on network 0x%08X",
-                   pResponse->command, pResponse->tx_id, this->config_.fan_networkId);
-          break;
-        }
+        this->rfHandleJoinComplete(pResponse);
         break;
 
       case StateIdle:
-        if ((pResponse->rx_type == this->config_.fan_my_device_type) && // If type
-            (pResponse->rx_id == this->config_.fan_my_device_id))
-        { // and id match, it is for us
-          switch (pResponse->command)
-          {
-          case FAN_TYPE_FAN_SETTINGS:
-            ESP_LOGD(TAG, "Received fan settings; speed: 0x%02X voltage: %i timer: %i",
-                     pResponse->payload.fanSettings.speed, pResponse->payload.fanSettings.voltage,
-                     pResponse->payload.fanSettings.timer);
-
-            this->rfComplete();
-
-            this->state = pResponse->payload.fanSettings.speed > 0;
-            this->speed = pResponse->payload.fanSettings.speed;
-            this->timer = pResponse->payload.fanSettings.timer;
-            this->voltage = pResponse->payload.fanSettings.voltage;
-            this->publish_state();
-
-            this->state_ = StateIdle;
-            break;
-
-          default:
-            ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X", pResponse->command,
-                     pResponse->tx_id);
-            break;
-          }
-        }
-        else
-        {
-          ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X", pResponse->command,
-                   pResponse->tx_id, pResponse->tx_type);
-        }
-        break;
-
       case StateWaitQueryResponse:
-        if ((pResponse->rx_type == this->config_.fan_my_device_type) && // If type
-            (pResponse->rx_id == this->config_.fan_my_device_id))
-        { // and id match, it is for us
-          switch (pResponse->command)
-          {
-          case FAN_TYPE_FAN_SETTINGS:
-            ESP_LOGD(TAG, "Received fan settings; speed: 0x%02X voltage: %i timer: %i",
-                     pResponse->payload.fanSettings.speed, pResponse->payload.fanSettings.voltage,
-                     pResponse->payload.fanSettings.timer);
-
-            this->rfComplete();
-
-            this->state = pResponse->payload.fanSettings.speed > 0;
-            this->speed = pResponse->payload.fanSettings.speed;
-            this->timer = pResponse->payload.fanSettings.timer;
-            this->voltage = pResponse->payload.fanSettings.voltage;
-            this->publish_state();
-
-            this->state_ = StateIdle;
-            break;
-
-          default:
-            ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X", pResponse->command,
-                     pResponse->tx_id);
-            break;
-          }
-        }
-        else
-        {
-          ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X", pResponse->command,
-                   pResponse->tx_id, pResponse->tx_type);
-        }
+        // Both states accept an unsolicited / polled fan-settings update.
+        this->rfHandleFanSettingsResponse(pResponse);
         break;
 
       case StateWaitFilterStatusResponse:
-        if ((pResponse->rx_type == this->config_.fan_my_device_type) && // If type
-            (pResponse->rx_id == this->config_.fan_my_device_id))
-        { // and id match, it is for us
-          switch (pResponse->command)
-          {
-          case FAN_TYPE_FILTER_STATUS_RESPONSE:
-          {
-            const RfPayloadFilterStatus *filterStatus =
-                reinterpret_cast<const RfPayloadFilterStatus *>(&pResponse->payload);
-
-            ESP_LOGD(TAG, "Received filter status; total hours: %u, filter hours: %u, remaining: %u%%",
-                     filterStatus->totalRunHours, filterStatus->filterRunHours,
-                     filterStatus->filterPercentRemaining);
-
-            this->rfComplete();
-
-            // Update sensor values if you've added them
-            if (this->filter_remaining_sensor_ != nullptr)
-            {
-              this->filter_remaining_sensor_->publish_state(filterStatus->filterPercentRemaining);
-            }
-            if (this->filter_runtime_sensor_ != nullptr)
-            {
-              this->filter_runtime_sensor_->publish_state(filterStatus->filterRunHours);
-            }
-
-            this->state_ = StateIdle;
-            break;
-          }
-
-          default:
-            ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X",
-                     pResponse->command, pResponse->tx_id);
-            break;
-          }
-        }
-        else
-        {
-          ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X",
-                   pResponse->command, pResponse->tx_id, pResponse->tx_type);
-        }
+        this->rfHandleFilterStatusResponse(pResponse);
         break;
 
       case StateWaitErrorStatusResponse:
-        if ((pResponse->rx_type == this->config_.fan_my_device_type) && // If type
-            (pResponse->rx_id == this->config_.fan_my_device_id))
-        { // and id match, it is for us
-          switch (pResponse->command)
-          {
-          case FAN_TYPE_ERROR_STATUS_RESPONSE:
-          {
-            const RfPayloadErrorStatus *errorStatus =
-                reinterpret_cast<const RfPayloadErrorStatus *>(&pResponse->payload);
-
-            ESP_LOGD(TAG, "Received error status; count: %u, severity: %u",
-                     errorStatus->errorCount, errorStatus->errorSeverity);
-
-            this->rfComplete();
-
-            // Update sensor values
-            if (this->error_count_sensor_ != nullptr)
-            {
-              this->error_count_sensor_->publish_state(errorStatus->errorCount);
-            }
-
-            if (this->error_code_sensor_ != nullptr && errorStatus->errorCount > 0)
-            {
-              char error_text[32];
-              snprintf(error_text, sizeof(error_text), "E%02d", errorStatus->errorCodes[0]);
-              for (int i = 1; i < errorStatus->errorCount && i < 5; i++)
-              {
-                char temp[8];
-                snprintf(temp, sizeof(temp), ",E%02d", errorStatus->errorCodes[i]);
-                strncat(error_text, temp, sizeof(error_text) - strlen(error_text) - 1);
-              }
-              this->error_code_sensor_->publish_state(error_text);
-            }
-            else if (this->error_code_sensor_ != nullptr)
-            {
-              this->error_code_sensor_->publish_state("No Errors");
-            }
-
-            this->state_ = StateIdle;
-            break;
-          }
-
-          default:
-            ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X",
-                     pResponse->command, pResponse->tx_id);
-            break;
-          }
-        }
-        else
-        {
-          ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X",
-                   pResponse->command, pResponse->tx_id, pResponse->tx_type);
-        }
+        this->rfHandleErrorStatusResponse(pResponse);
         break;
 
       case StateWaitSetSpeedResponse:
-        if ((pResponse->rx_type == this->config_.fan_my_device_type) && // If type
-            (pResponse->rx_id == this->config_.fan_my_device_id))
-        { // and id match, it is for us
-          switch (pResponse->command)
-          {
-          case FAN_TYPE_FAN_SETTINGS:
-            ESP_LOGD(TAG, "Received fan settings; speed: 0x%02X voltage: %i timer: %i",
-                     pResponse->payload.fanSettings.speed, pResponse->payload.fanSettings.voltage,
-                     pResponse->payload.fanSettings.timer);
-
-            this->rfComplete();
-
-            this->state = pResponse->payload.fanSettings.speed > 0;
-            this->speed = pResponse->payload.fanSettings.speed;
-            this->timer = pResponse->payload.fanSettings.timer;
-            this->voltage = pResponse->payload.fanSettings.voltage;
-            this->publish_state();
-
-            (void)memset(this->_txFrame, 0, FAN_FRAMESIZE); // Clear frame data
-
-            pTxFrame->rx_type = this->config_.fan_main_unit_type; // Set type to main unit
-            pTxFrame->rx_id = this->config_.fan_main_unit_id;     // Set ID to the ID of the main unit
-            pTxFrame->tx_type = this->config_.fan_my_device_type;
-            pTxFrame->tx_id = this->config_.fan_my_device_id;
-            pTxFrame->ttl = FAN_TTL;
-            pTxFrame->command = FAN_FRAME_SETSPEED_REPLY; // 0x0B acknowledge link successful
-            pTxFrame->parameter_count = 0x03;             // 3 parameters
-            pTxFrame->payload.parameters[0] = 0x54;
-            pTxFrame->payload.parameters[1] = 0x03;
-            pTxFrame->payload.parameters[2] = 0x20;
-
-            // Send response frame
-            this->startTransmit(this->_txFrame, -1, NULL);
-
-            this->state_ = StateWaitSetSpeedConfirm;
-            break;
-
-          case FAN_FRAME_SETSPEED_REPLY:
-          case FAN_FRAME_SETVOLTAGE_REPLY:
-            // this->rfComplete();
-
-            // this->state_ = StateIdle;
-            break;
-
-          default:
-            ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X", pResponse->command,
-                     pResponse->tx_id);
-            break;
-          }
-        }
-        else
-        {
-          ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X", pResponse->command,
-                   pResponse->tx_id, pResponse->tx_type);
-        }
+        this->rfHandleSetSpeedResponse(pResponse);
         break;
 
       default:
         ESP_LOGD(TAG, "Received frame from unknown device in unknown state; type 0x%02X from ID 0x%02X type 0x%02X",
                  pResponse->command, pResponse->tx_id, pResponse->tx_type);
+        break;
+      }
+    }
+
+    bool ZehnderRF::addressedToUs(const RfFrame *const pResponse) const
+    {
+      return (pResponse->rx_type == this->config_.fan_my_device_type) &&
+             (pResponse->rx_id == this->config_.fan_my_device_id);
+    }
+
+    // Applies a fan-settings (0x07) frame to our published state.
+    void ZehnderRF::handleFanSettings(const RfFrame *const pResponse)
+    {
+      ESP_LOGD(TAG, "Received fan settings; speed: 0x%02X voltage: %i timer: %i",
+               pResponse->payload.fanSettings.speed, pResponse->payload.fanSettings.voltage,
+               pResponse->payload.fanSettings.timer);
+
+      this->rfComplete();
+
+      this->state = pResponse->payload.fanSettings.speed > 0;
+      this->speed = pResponse->payload.fanSettings.speed;
+      this->timer = pResponse->payload.fanSettings.timer;
+      this->voltage = pResponse->payload.fanSettings.voltage;
+      this->publish_state();
+    }
+
+    // Pairing: main unit opened its network, so request to join it.
+    void ZehnderRF::rfHandleLinkRequest(const RfFrame *const pResponse)
+    {
+      RfFrame *const pTxFrame = (RfFrame *)this->_txFrame; // frame helper
+      nrf905::Config rfConfig;
+
+      ESP_LOGD(TAG, "DiscoverStateWaitForLinkRequest");
+      switch (pResponse->command)
+      {
+      case FAN_NETWORK_JOIN_OPEN: // Received linking request from main unit
+        ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X (%s) with ID 0x%02X on network 0x%08X", pResponse->tx_type,
+                 pResponse->tx_type == FAN_TYPE_MAIN_UNIT ? "Main" : "?", pResponse->tx_id,
+                 pResponse->payload.networkJoinOpen.networkId);
+
+        this->rfComplete();
+
+        (void)memset(this->_txFrame, 0, FAN_FRAMESIZE); // Clear frame data
+
+        // Found a main unit, so send a join request
+        pTxFrame->rx_type = FAN_TYPE_MAIN_UNIT; // Set type to main unit
+        pTxFrame->rx_id = pResponse->tx_id;     // Set ID to the ID of the main unit
+        pTxFrame->tx_type = this->config_.fan_my_device_type;
+        pTxFrame->tx_id = this->config_.fan_my_device_id;
+        pTxFrame->ttl = FAN_TTL;
+        pTxFrame->command = FAN_NETWORK_JOIN_REQUEST; // Request to connect to network
+        pTxFrame->parameter_count = sizeof(RfPayloadNetworkJoinOpen);
+        // Request to connect to the received network ID
+        pTxFrame->payload.networkJoinRequest.networkId = pResponse->payload.networkJoinOpen.networkId;
+
+        // Store for later
+        this->config_.fan_networkId = pResponse->payload.networkJoinOpen.networkId;
+        this->config_.fan_main_unit_type = pResponse->tx_type;
+        this->config_.fan_main_unit_id = pResponse->tx_id;
+
+        // Update address
+        rfConfig = this->rf_->getConfig();
+        rfConfig.rx_address = pResponse->payload.networkJoinOpen.networkId;
+        this->rf_->updateConfig(&rfConfig, NULL);
+        this->rf_->writeTxAddress(pResponse->payload.networkJoinOpen.networkId, NULL);
+
+        // Send response frame
+        this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
+                            {
+          ESP_LOGW(TAG, "Query Timeout");
+          this->fsmState_ = StateStartDiscovery; });
+
+        this->fsmState_ = StateDiscoveryWaitForJoinResponse;
+        break;
+
+      default:
+        ESP_LOGD(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X", pResponse->command,
+                 pResponse->tx_id);
+        break;
+      }
+    }
+
+    // Pairing: main unit acknowledged our join request, so confirm the link.
+    void ZehnderRF::rfHandleJoinResponse(const RfFrame *const pResponse)
+    {
+      RfFrame *const pTxFrame = (RfFrame *)this->_txFrame; // frame helper
+
+      ESP_LOGD(TAG, "DiscoverStateWaitForJoinResponse");
+      switch (pResponse->command)
+      {
+      case FAN_FRAME_0B:
+        if ((pResponse->rx_type == this->config_.fan_my_device_type) &&
+            (pResponse->rx_id == this->config_.fan_my_device_id) &&
+            (pResponse->tx_type == this->config_.fan_main_unit_type) &&
+            (pResponse->tx_id == this->config_.fan_main_unit_id))
+        {
+          ESP_LOGD(TAG, "Discovery: Link successful to unit with ID 0x%02X on network 0x%08X", pResponse->tx_id,
+                   this->config_.fan_networkId);
+
+          this->rfComplete();
+
+          (void)memset(this->_txFrame, 0, FAN_FRAMESIZE); // Clear frame data
+
+          pTxFrame->rx_type = FAN_TYPE_MAIN_UNIT; // Set type to main unit
+          pTxFrame->rx_id = pResponse->tx_id;     // Set ID to the ID of the main unit
+          pTxFrame->tx_type = this->config_.fan_my_device_type;
+          pTxFrame->tx_id = this->config_.fan_my_device_id;
+          pTxFrame->ttl = FAN_TTL;
+          pTxFrame->command = FAN_FRAME_0B; // 0x0B acknowledge link successful
+          pTxFrame->parameter_count = 0x00; // No parameters
+
+          // Send response frame
+          this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
+                              {
+            ESP_LOGW(TAG, "Query Timeout");
+            this->fsmState_ = StateStartDiscovery; });
+
+          this->fsmState_ = StateDiscoveryJoinComplete;
+        }
+        else
+        {
+          ESP_LOGE(TAG, "Discovery: Received unknown link success from ID 0x%02X on network 0x%08X", pResponse->tx_id,
+                   this->config_.fan_networkId);
+        }
+        break;
+
+      default:
+        ESP_LOGE(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X", pResponse->command,
+                 pResponse->tx_id);
+        break;
+      }
+    }
+
+    // Pairing: main unit confirmed the network join; persist config and go idle.
+    void ZehnderRF::rfHandleJoinComplete(const RfFrame *const pResponse)
+    {
+      ESP_LOGD(TAG, "StateDiscoveryJoinComplete");
+      switch (pResponse->command)
+      {
+      case FAN_TYPE_QUERY_NETWORK:
+        if ((pResponse->rx_type == this->config_.fan_main_unit_type) &&
+            (pResponse->rx_id == this->config_.fan_main_unit_id) &&
+            (pResponse->tx_type == this->config_.fan_main_unit_type) &&
+            (pResponse->tx_id == this->config_.fan_main_unit_id))
+        {
+          ESP_LOGD(TAG, "Discovery: received network join success 0x0D");
+
+          this->rfComplete();
+
+          ESP_LOGD(TAG, "Saving pairing config");
+          this->pref_.save(&this->config_);
+          // Force the pairing data to flash immediately. Otherwise it only gets
+          // written on the (long) flash_write_interval, so a power cycle before
+          // then loses the pairing and forces the user to pair again.
+          global_preferences->sync();
+
+          this->fsmState_ = StateIdle;
+        }
+        else
+        {
+          ESP_LOGW(TAG, "Unexpected frame join reponse from Type 0x%02X ID 0x%02X", pResponse->tx_type,
+                   pResponse->tx_id);
+        }
+        break;
+
+      default:
+        ESP_LOGE(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X on network 0x%08X",
+                 pResponse->command, pResponse->tx_id, this->config_.fan_networkId);
+        break;
+      }
+    }
+
+    // Idle / query response: the fan reported its current settings.
+    void ZehnderRF::rfHandleFanSettingsResponse(const RfFrame *const pResponse)
+    {
+      if (!this->addressedToUs(pResponse))
+      {
+        ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X", pResponse->command,
+                 pResponse->tx_id, pResponse->tx_type);
+        return;
+      }
+
+      switch (pResponse->command)
+      {
+      case FAN_TYPE_FAN_SETTINGS:
+        this->handleFanSettings(pResponse);
+        this->fsmState_ = StateIdle;
+        break;
+
+      default:
+        ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X", pResponse->command, pResponse->tx_id);
+        break;
+      }
+    }
+
+    void ZehnderRF::rfHandleFilterStatusResponse(const RfFrame *const pResponse)
+    {
+      if (!this->addressedToUs(pResponse))
+      {
+        ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X", pResponse->command,
+                 pResponse->tx_id, pResponse->tx_type);
+        return;
+      }
+
+      switch (pResponse->command)
+      {
+      case FAN_TYPE_FILTER_STATUS_RESPONSE:
+      {
+        const RfPayloadFilterStatus *filterStatus =
+            reinterpret_cast<const RfPayloadFilterStatus *>(&pResponse->payload);
+
+        ESP_LOGD(TAG, "Received filter status; total hours: %u, filter hours: %u, remaining: %u%%",
+                 filterStatus->totalRunHours, filterStatus->filterRunHours, filterStatus->filterPercentRemaining);
+
+        this->rfComplete();
+
+        // Update sensor values if you've added them
+        if (this->filter_remaining_sensor_ != nullptr)
+        {
+          this->filter_remaining_sensor_->publish_state(filterStatus->filterPercentRemaining);
+        }
+        if (this->filter_runtime_sensor_ != nullptr)
+        {
+          this->filter_runtime_sensor_->publish_state(filterStatus->filterRunHours);
+        }
+
+        this->fsmState_ = StateIdle;
+        break;
+      }
+
+      default:
+        ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X", pResponse->command, pResponse->tx_id);
+        break;
+      }
+    }
+
+    void ZehnderRF::rfHandleErrorStatusResponse(const RfFrame *const pResponse)
+    {
+      if (!this->addressedToUs(pResponse))
+      {
+        ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X", pResponse->command,
+                 pResponse->tx_id, pResponse->tx_type);
+        return;
+      }
+
+      switch (pResponse->command)
+      {
+      case FAN_TYPE_ERROR_STATUS_RESPONSE:
+      {
+        const RfPayloadErrorStatus *errorStatus =
+            reinterpret_cast<const RfPayloadErrorStatus *>(&pResponse->payload);
+
+        ESP_LOGD(TAG, "Received error status; count: %u, severity: %u", errorStatus->errorCount,
+                 errorStatus->errorSeverity);
+
+        this->rfComplete();
+
+        // Update sensor values
+        if (this->error_count_sensor_ != nullptr)
+        {
+          this->error_count_sensor_->publish_state(errorStatus->errorCount);
+        }
+
+        if (this->error_code_sensor_ != nullptr && errorStatus->errorCount > 0)
+        {
+          char error_text[32];
+          snprintf(error_text, sizeof(error_text), "E%02d", errorStatus->errorCodes[0]);
+          for (int i = 1; i < errorStatus->errorCount && i < 5; i++)
+          {
+            char temp[8];
+            snprintf(temp, sizeof(temp), ",E%02d", errorStatus->errorCodes[i]);
+            strncat(error_text, temp, sizeof(error_text) - strlen(error_text) - 1);
+          }
+          this->error_code_sensor_->publish_state(error_text);
+        }
+        else if (this->error_code_sensor_ != nullptr)
+        {
+          this->error_code_sensor_->publish_state("No Errors");
+        }
+
+        this->fsmState_ = StateIdle;
+        break;
+      }
+
+      default:
+        ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X", pResponse->command, pResponse->tx_id);
+        break;
+      }
+    }
+
+    // Set-speed response: fan reported new settings, so ack and wait for confirm.
+    void ZehnderRF::rfHandleSetSpeedResponse(const RfFrame *const pResponse)
+    {
+      RfFrame *const pTxFrame = (RfFrame *)this->_txFrame; // frame helper
+
+      if (!this->addressedToUs(pResponse))
+      {
+        ESP_LOGD(TAG, "Received frame from unknown device; type 0x%02X from ID 0x%02X type 0x%02X", pResponse->command,
+                 pResponse->tx_id, pResponse->tx_type);
+        return;
+      }
+
+      switch (pResponse->command)
+      {
+      case FAN_TYPE_FAN_SETTINGS:
+        this->handleFanSettings(pResponse);
+
+        (void)memset(this->_txFrame, 0, FAN_FRAMESIZE); // Clear frame data
+
+        pTxFrame->rx_type = this->config_.fan_main_unit_type; // Set type to main unit
+        pTxFrame->rx_id = this->config_.fan_main_unit_id;     // Set ID to the ID of the main unit
+        pTxFrame->tx_type = this->config_.fan_my_device_type;
+        pTxFrame->tx_id = this->config_.fan_my_device_id;
+        pTxFrame->ttl = FAN_TTL;
+        pTxFrame->command = FAN_FRAME_SETSPEED_REPLY;
+        pTxFrame->parameter_count = sizeof(FAN_SETTINGS_ACK_PAYLOAD); // 3 parameters
+        (void)memcpy(pTxFrame->payload.parameters, FAN_SETTINGS_ACK_PAYLOAD, sizeof(FAN_SETTINGS_ACK_PAYLOAD));
+
+        // Send response frame
+        this->startTransmit(this->_txFrame, -1, NULL);
+
+        this->fsmState_ = StateWaitSetSpeedConfirm;
+        break;
+
+      case FAN_FRAME_SETSPEED_REPLY:
+      case FAN_FRAME_SETVOLTAGE_REPLY:
+        // Acknowledgement of our own reply; nothing further to do here.
+        break;
+
+      default:
+        ESP_LOGD(TAG, "Received unexpected frame; type 0x%02X from ID 0x%02X", pResponse->command, pResponse->tx_id);
         break;
       }
     }
@@ -808,9 +755,9 @@ namespace esphome
       this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
                           {
     ESP_LOGW(TAG, "Query Timeout");
-    this->state_ = StateIdle; });
+    this->fsmState_ = StateIdle; });
 
-      this->state_ = StateWaitQueryResponse;
+      this->fsmState_ = StateWaitQueryResponse;
     }
 
     void ZehnderRF::setSpeed(const uint8_t paramSpeed, const uint8_t paramTimer)
@@ -827,7 +774,7 @@ namespace esphome
 
       ESP_LOGD(TAG, "Set speed: 0x%02X; Timer %u minutes", speed, timer);
 
-      if (this->state_ == StateIdle)
+      if (this->fsmState_ == StateIdle)
       {
         (void)memset(this->_txFrame, 0, FAN_FRAMESIZE); // Clear frame data
 
@@ -858,10 +805,10 @@ namespace esphome
         this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
                             {
       ESP_LOGW(TAG, "Set speed timeout");
-      this->state_ = StateIdle; });
+      this->fsmState_ = StateIdle; });
 
         newSetting = false;
-        this->state_ = StateWaitSetSpeedResponse;
+        this->fsmState_ = StateWaitSetSpeedResponse;
       }
       else
       {
@@ -904,18 +851,16 @@ namespace esphome
       this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
                           {
     ESP_LOGW(TAG, "Start discovery timeout");
-    this->state_ = StateStartDiscovery; });
+    this->fsmState_ = StateStartDiscovery; });
 
       // Update state
-      this->state_ = StateDiscoveryWaitForLinkRequest;
+      this->fsmState_ = StateDiscoveryWaitForLinkRequest;
     }
 
     Result ZehnderRF::startTransmit(const uint8_t *const pData, const int8_t rxRetries,
                                     const std::function<void(void)> callback)
     {
       Result result = ResultOk;
-      unsigned long startTime;
-      bool busy = true;
 
       if (this->rfState_ != RfStateIdle)
       {
@@ -927,11 +872,8 @@ namespace esphome
         this->onReceiveTimeout_ = callback;
         this->retries_ = rxRetries;
 
-        // Write data to RF
-        // if (pData != NULL) {  // If frame given, load it in the nRF. Else use previous TX payload
-        // ESP_LOGD(TAG, "Write payload");
+        // Load the frame into the nRF905, then wait for a free airway before TX.
         this->rf_->writeTxPayload(pData, FAN_FRAMESIZE); // Use framesize
-        // }
 
         this->rfState_ = RfStateWaitAirwayFree;
         this->airwayFreeWaitTime_ = millis();
@@ -954,7 +896,7 @@ namespace esphome
         break;
 
       case RfStateWaitAirwayFree:
-        if ((millis() - this->airwayFreeWaitTime_) > 5000)
+        if ((millis() - this->airwayFreeWaitTime_) > FAN_AIRWAY_TIMEOUT_MS)
         {
           ESP_LOGW(TAG, "Airway too busy, giving up");
           this->rfState_ = RfStateIdle;
