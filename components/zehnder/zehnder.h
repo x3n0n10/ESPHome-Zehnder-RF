@@ -12,6 +12,10 @@
 namespace esphome {
 namespace zehnder {
 
+// Bump this whenever the component code changes so you can confirm from Home
+// Assistant / the logs which build is actually running on the device.
+#define ZEHNDER_RF_VERSION "0.1.0"
+
 #define FAN_FRAMESIZE 16        // Each frame consists of 16 bytes
 #define FAN_TX_FRAMES 4         // Retransmit every transmitted frame 4 times
 #define FAN_TX_RETRIES 10       // Retry transmission 10 times if no reply is received
@@ -96,6 +100,10 @@ class ZehnderRF : public Component, public fan::Fan {
 
   fan::FanTraits get_traits() override;
   int get_speed_count() { return this->speed_count_; }
+
+  // Returns the component version string (see ZEHNDER_RF_VERSION). Handy for a
+  // template text_sensor so the running version is visible in Home Assistant.
+  const char *get_version() const { return ZEHNDER_RF_VERSION; }
 
   void loop() override;
 
