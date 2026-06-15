@@ -149,6 +149,7 @@ namespace esphome
 
       this->lastFilterQuery_ = 0;
       this->lastErrorQuery_ = 0;
+      this->lastStateIdleTime_ = millis();
 
       this->rf_->setOnTxReady([this](void)
                               {
@@ -209,6 +210,7 @@ namespace esphome
       this->config_.fan_main_unit_id   = fan_main_unit_id;   // Fan (Zehnder/BUVA) main unit ID
       ESP_LOGD(TAG, "Saving pairing config");
       this->pref_.save(&this->config_);
+      global_preferences->sync();
     }
 
     void ZehnderRF::loop(void)
@@ -218,6 +220,28 @@ namespace esphome
 
       // Run RF handler
       this->rfHandler();
+
+      // State machine watchdog: if we get stuck waiting in any non-idle state
+      // (other than startup/pairing, which legitimately wait for the user), force
+      // a recovery back to idle. This guarantees the component self-heals instead
+      // of needing a manual reboot.
+      if (this->state_ == StateIdle)
+      {
+        this->lastStateIdleTime_ = millis();
+      }
+      else if ((this->state_ != StateStartup) && (this->state_ != StateStartDiscovery) &&
+               (this->state_ != StateDiscoveryWaitForLinkRequest) &&
+               (this->state_ != StateDiscoveryWaitForJoinResponse) &&
+               (this->state_ != StateDiscoveryJoinComplete))
+      {
+        if ((millis() - this->lastStateIdleTime_) > FAN_STATE_WATCHDOG_TIMEOUT)
+        {
+          ESP_LOGW(TAG, "State machine stuck in state 0x%02X, forcing recovery", this->state_);
+          this->rfComplete();
+          this->state_ = StateIdle;
+          this->lastStateIdleTime_ = millis();
+        }
+      }
 
       switch (this->state_)
       {
@@ -262,6 +286,7 @@ namespace esphome
           // When done, return to idle
           this->state_ = StateIdle;
         }
+        break;
 
       case StateIdle:
         if (newSetting == true)
@@ -476,6 +501,10 @@ namespace esphome
 
             ESP_LOGD(TAG, "Saving pairing config");
             this->pref_.save(&this->config_);
+            // Force the pairing data to flash immediately. Otherwise it only gets
+            // written on the (long) flash_write_interval, so a power cycle before
+            // then loses the pairing and forces the user to pair again.
+            global_preferences->sync();
 
             this->state_ = StateIdle;
           }
@@ -939,11 +968,26 @@ namespace esphome
           ESP_LOGD(TAG, "Start TX");
           this->rf_->startTx(FAN_TX_FRAMES, nrf905::Receive); // After transmit, wait for response
 
+          this->txStartTime_ = millis();
           this->rfState_ = RfStateTxBusy;
         }
         break;
 
       case RfStateTxBusy:
+        // Safety net: the transition out of TxBusy depends on the nRF905 TxReady
+        // callback, which is driven by polling the DR status bit. If that edge is
+        // ever missed the radio would otherwise stay busy forever and require a
+        // reboot. Time out and reset instead.
+        if ((millis() - this->txStartTime_) > FAN_TX_TIMEOUT)
+        {
+          ESP_LOGW(TAG, "TX timeout (no TxReady), resetting radio");
+          this->rfState_ = RfStateIdle;
+
+          if (this->onReceiveTimeout_ != NULL)
+          {
+            this->onReceiveTimeout_();
+          }
+        }
         break;
 
       case RfStateRxWait:
