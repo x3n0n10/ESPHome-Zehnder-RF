@@ -14,7 +14,7 @@ namespace zehnder {
 
 // Bump this whenever the component code changes so you can confirm from Home
 // Assistant / the logs which build is actually running on the device.
-#define ZEHNDER_RF_VERSION "0.1.0"
+#define ZEHNDER_RF_VERSION "0.2.0"
 
 #define FAN_FRAMESIZE 16        // Each frame consists of 16 bytes
 #define FAN_TX_FRAMES 4         // Retransmit every transmitted frame 4 times
