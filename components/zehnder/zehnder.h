@@ -14,7 +14,7 @@ namespace zehnder {
 
 // Bump this whenever the component code changes so you can confirm from Home
 // Assistant / the logs which build is actually running on the device.
-#define ZEHNDER_RF_VERSION "0.2.0"
+#define ZEHNDER_RF_VERSION "0.3.0"
 
 #define FAN_FRAMESIZE 16        // Each frame consists of 16 bytes
 #define FAN_TX_FRAMES 4         // Retransmit every transmitted frame 4 times
@@ -27,6 +27,11 @@ namespace zehnder {
 // otherwise require a manual reboot of the ESP).
 #define FAN_TX_TIMEOUT 2000               // Max time to wait for a TxReady before resetting the radio
 #define FAN_STATE_WATCHDOG_TIMEOUT 60000  // Force recovery if stuck out of idle this long
+
+// After this many consecutive transmit failures with zero replies from the fan,
+// the nRF905 is assumed to have gone deaf and is re-initialized in software
+// (the equivalent of a reboot, which is what otherwise fixes it).
+#define FAN_MAX_CONSECUTIVE_TIMEOUTS 3
 
 // nRF905 RF settings used to talk to the Zehnder/BUVA fan network.
 #define FAN_RF_CHANNEL 118          // nRF905 channel
@@ -209,6 +214,11 @@ class ZehnderRF : public Component, public fan::Fan {
   void rfHandler(void);
   void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
 
+  // Recovery from a "deaf" radio: count transmits that got no reply, and once
+  // FAN_MAX_CONSECUTIVE_TIMEOUTS is reached, re-initialize the nRF905.
+  void noteTransactionFailed(void);
+  void reinitRadio(void);
+
   // Returns true if a received frame is addressed to this device.
   bool addressedToUs(const RfFrame *const pResponse) const;
   // Applies a fan-settings frame to our published state (speed/timer/voltage).
@@ -284,6 +294,8 @@ class ZehnderRF : public Component, public fan::Fan {
   uint8_t newSpeed{0};
   uint8_t newTimer{0};
   bool newSetting{false};
+
+  uint8_t consecutiveTimeouts_{0};  // Reset on any real reply; see reinitRadio()
 
   typedef enum {
     RfStateIdle,            // Idle state

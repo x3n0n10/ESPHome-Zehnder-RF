@@ -94,6 +94,11 @@ class nRF905 : public Component,
 
   void setup() override;
 
+  // Power-cycle the module and re-write its configuration registers, without
+  // touching the SPI/GPIO setup. Used to recover a radio that has stopped
+  // receiving, as a software alternative to a full reboot.
+  void reinit(void);
+
   // float get_setup_priority() const override { return setup_priority::HARDWARE; }
   float get_setup_priority() const override { return setup_priority::AFTER_CONNECTION; }
 

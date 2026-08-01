@@ -73,6 +73,24 @@ void nRF905::setup() {
   ESP_LOGD(TAG, "nRF905 Setup complete");
 }
 
+void nRF905::reinit(void) {
+  ESP_LOGD(TAG, "Re-initializing nRF905");
+
+  // Power-cycle the module to clear any latched bad state.
+  this->_gpio_pin_pwr->digital_write(false);
+  delay(50);  // Wait for the module to fully power down
+  this->_gpio_pin_pwr->digital_write(true);
+  delay(50);  // Wait for the module to stabilize
+
+  this->setMode(PowerDown);
+
+  // Re-write the current configuration registers (rx address, channel, CRC, ...).
+  this->writeConfigRegisters();
+
+  // Return to idle, ready to transmit/receive again.
+  this->setMode(Idle);
+}
+
 void nRF905::dump_config() {
   ESP_LOGCONFIG(TAG, "Config:");
 

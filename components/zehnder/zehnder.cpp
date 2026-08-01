@@ -389,6 +389,9 @@ namespace esphome
 
       this->rfComplete();
 
+      // A real reply arrived, so the radio is hearing the fan again.
+      this->consecutiveTimeouts_ = 0;
+
       this->state = pResponse->payload.fanSettings.speed > 0;
       this->speed = pResponse->payload.fanSettings.speed;
       this->timer = pResponse->payload.fanSettings.timer;
@@ -888,6 +891,50 @@ namespace esphome
       this->rfState_ = RfStateIdle;
     }
 
+    // Called whenever a transmit ultimately fails with no reply from the fan.
+    void ZehnderRF::noteTransactionFailed(void)
+    {
+      // Only track failures once paired; discovery timeouts are expected while
+      // waiting for the user to put the fan into pairing mode.
+      if (this->config_.fan_networkId == 0x00000000)
+      {
+        return;
+      }
+
+      if (this->consecutiveTimeouts_ < 0xFF)
+      {
+        ++this->consecutiveTimeouts_;
+      }
+
+      if (this->consecutiveTimeouts_ >= FAN_MAX_CONSECUTIVE_TIMEOUTS)
+      {
+        this->reinitRadio();
+      }
+    }
+
+    // Recover a "deaf" radio in software, the equivalent of the reboot that
+    // otherwise fixes it: power-cycle and reconfigure the nRF905.
+    void ZehnderRF::reinitRadio(void)
+    {
+      ESP_LOGW(TAG, "Radio appears deaf after %u consecutive failures; re-initializing nRF905",
+               this->consecutiveTimeouts_);
+
+      this->rf_->reinit();
+
+      // Re-assert the RX/TX address for our paired network (or the default when
+      // still unpaired), since a fresh init may not carry it over reliably.
+      const uint32_t address =
+          (this->config_.fan_networkId != 0x00000000) ? this->config_.fan_networkId : FAN_DEFAULT_RF_ADDRESS;
+      nrf905::Config rfConfig = this->rf_->getConfig();
+      rfConfig.rx_address = address;
+      this->rf_->updateConfig(&rfConfig);
+      this->rf_->writeTxAddress(address);
+
+      // Radio is fresh; clear RF state and the failure counter.
+      this->rfComplete();
+      this->consecutiveTimeouts_ = 0;
+    }
+
     void ZehnderRF::rfHandler(void)
     {
       switch (this->rfState_)
@@ -905,6 +952,7 @@ namespace esphome
           {
             this->onReceiveTimeout_();
           }
+          this->noteTransactionFailed();
         }
         else if (this->rf_->airwayBusy() == false)
         {
@@ -930,6 +978,7 @@ namespace esphome
           {
             this->onReceiveTimeout_();
           }
+          this->noteTransactionFailed();
         }
         break;
 
@@ -959,6 +1008,9 @@ namespace esphome
 
             // Back to idle
             this->rfState_ = RfStateIdle;
+
+            // Count this as a failed transaction (may trigger a radio re-init).
+            this->noteTransactionFailed();
           }
         }
         break;
