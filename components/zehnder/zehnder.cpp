@@ -1,4 +1,5 @@
 #include "zehnder.h"
+#include <inttypes.h>
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
@@ -123,8 +124,8 @@ namespace esphome
     {
       ESP_LOGCONFIG(TAG, "Zehnder Fan config:");
       ESP_LOGCONFIG(TAG, "  Component version  %s", ZEHNDER_RF_VERSION);
-      ESP_LOGCONFIG(TAG, "  Polling interval   %u", this->interval_);
-      ESP_LOGCONFIG(TAG, "  Fan networkId      0x%08X", this->config_.fan_networkId);
+      ESP_LOGCONFIG(TAG, "  Polling interval   %" PRIu32, this->interval_);
+      ESP_LOGCONFIG(TAG, "  Fan networkId      0x%08" PRIX32, this->config_.fan_networkId);
       ESP_LOGCONFIG(TAG, "  Fan my device type 0x%02X", this->config_.fan_my_device_type);
       ESP_LOGCONFIG(TAG, "  Fan my device id   0x%02X", this->config_.fan_my_device_id);
       ESP_LOGCONFIG(TAG, "  Fan main_unit type 0x%02X", this->config_.fan_main_unit_type);
@@ -409,7 +410,7 @@ namespace esphome
       switch (pResponse->command)
       {
       case FAN_NETWORK_JOIN_OPEN: // Received linking request from main unit
-        ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X (%s) with ID 0x%02X on network 0x%08X", pResponse->tx_type,
+        ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X (%s) with ID 0x%02X on network 0x%08" PRIX32, pResponse->tx_type,
                  pResponse->tx_type == FAN_TYPE_MAIN_UNIT ? "Main" : "?", pResponse->tx_id,
                  pResponse->payload.networkJoinOpen.networkId);
 
@@ -469,7 +470,7 @@ namespace esphome
             (pResponse->tx_type == this->config_.fan_main_unit_type) &&
             (pResponse->tx_id == this->config_.fan_main_unit_id))
         {
-          ESP_LOGD(TAG, "Discovery: Link successful to unit with ID 0x%02X on network 0x%08X", pResponse->tx_id,
+          ESP_LOGD(TAG, "Discovery: Link successful to unit with ID 0x%02X on network 0x%08" PRIX32, pResponse->tx_id,
                    this->config_.fan_networkId);
 
           this->rfComplete();
@@ -494,7 +495,7 @@ namespace esphome
         }
         else
         {
-          ESP_LOGE(TAG, "Discovery: Received unknown link success from ID 0x%02X on network 0x%08X", pResponse->tx_id,
+          ESP_LOGE(TAG, "Discovery: Received unknown link success from ID 0x%02X on network 0x%08" PRIX32, pResponse->tx_id,
                    this->config_.fan_networkId);
         }
         break;
@@ -539,7 +540,7 @@ namespace esphome
         break;
 
       default:
-        ESP_LOGE(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X on network 0x%08X",
+        ESP_LOGE(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X on network 0x%08" PRIX32,
                  pResponse->command, pResponse->tx_id, this->config_.fan_networkId);
         break;
       }

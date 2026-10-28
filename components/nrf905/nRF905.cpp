@@ -1,6 +1,7 @@
 #include "nRF905.h"
 #include "esphome/core/log.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #define CHECK_REG_WRITE true
@@ -287,7 +288,7 @@ void nRF905::writeTxAddress(const uint32_t txAddress, uint8_t *const pStatus) {
   Mode mode;
   AddressBuffer buffer;
 
-  ESP_LOGD(TAG, "Set TX Address: 0x%08X", txAddress);
+  ESP_LOGD(TAG, "Set TX Address: 0x%08" PRIX32, txAddress);
 
   mode = this->_mode;
   this->setMode(Idle);
@@ -325,7 +326,7 @@ void nRF905::readTxAddress(uint32_t *pTxAddress, uint8_t *const pStatus) {
   *pTxAddress |= (buffer.address[2] << 16);
   *pTxAddress |= (buffer.address[3] << 24);
 
-  ESP_LOGD(TAG, "Got TX Address: 0x%08X", *pTxAddress);
+  ESP_LOGD(TAG, "Got TX Address: 0x%08" PRIX32, *pTxAddress);
 
   if (pStatus != NULL) {
     *pStatus = buffer.command;
