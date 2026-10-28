@@ -114,6 +114,12 @@ void nRF905::loop() {
   static bool addrMatch;
   uint8_t buffer[NRF905_MAX_FRAMESIZE];
 
+  // Poll as fast as possible only while transmitting: the radio keeps sending
+  // until we see TX-ready and switch mode, so a slow poll means a long deaf TX.
+  if (this->_mode != Transmit) {
+    this->tx_loop_requester_.stop();
+  }
+
   uint8_t state = this->readStatus() & ((1 << NRF905_STATUS_DR) | (1 << NRF905_STATUS_AM));
   if (lastState != state) {
     ESP_LOGV(TAG, "State change: 0x%02X -> 0x%02X", lastState, state);
@@ -580,6 +586,7 @@ void nRF905::startTx(const uint32_t retransmit, const Mode nextMode) {
 
   // Start transmit
   this->setMode(Transmit);
+  this->tx_loop_requester_.start();
 }
 
 uint8_t nRF905::readStatus(void) {

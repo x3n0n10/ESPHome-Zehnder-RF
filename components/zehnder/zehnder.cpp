@@ -802,13 +802,14 @@ namespace esphome
           pFrame->payload.setTimer.timer = timer;
         }
 
+        // Give the RF 500ms to stabilize without blocking the main loop. The
+        // frame buffer stays untouched meanwhile: fsmState_ is no longer idle.
         ESP_LOGD(TAG, "Waiting for initial RF stabilization...");
-        delay(500); // Wait 500ms for RF to stabilize
-
-        this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
-                            {
-      ESP_LOGW(TAG, "Set speed timeout");
-      this->fsmState_ = StateIdle; });
+        this->set_timeout("set_speed_tx", 500, [this]()
+                          { this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]()
+                                                {
+          ESP_LOGW(TAG, "Set speed timeout");
+          this->fsmState_ = StateIdle; }); });
 
         newSetting = false;
         this->fsmState_ = StateWaitSetSpeedResponse;

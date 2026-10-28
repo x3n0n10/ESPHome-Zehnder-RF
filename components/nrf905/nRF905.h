@@ -163,6 +163,8 @@ class nRF905 : public Component,
 
   Mode _mode{PowerDown};
 
+  HighFrequencyLoopRequester tx_loop_requester_;
+
   Config _config;
 };
 
